@@ -15,15 +15,18 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ruby-version: ["2.6", "3.3"]
 
     steps:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Set up Ruby
+      - name: Set up Ruby ${{ matrix.ruby-version }}
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "2.6"
+          ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
 
       - name: Install
