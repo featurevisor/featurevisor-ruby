@@ -8,7 +8,7 @@ Gem::Specification.new do |spec|
   spec.description   = "Featurevisor Ruby SDK with CLI tools for feature flags management"
   spec.homepage      = "https://featurevisor.com"
   spec.license       = "MIT"
-  spec.required_ruby_version = ">= 2.6.0"
+  spec.required_ruby_version = ">= 3.0.0"
 
   spec.files         = Dir.glob("lib/**/*") + Dir.glob("bin/**/*") + %w[README.md LICENSE]
   spec.bindir        = "bin"
