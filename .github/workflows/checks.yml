@@ -1,0 +1,39 @@
+name: Checks
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    types:
+      - opened
+      - synchronize # when a PR is updated
+      - reopened # when a PR is reopened
+      - ready_for_review # when a PR is ready for review
+      - review_requested # when a PR is requested for review
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "2.6"
+          bundler-cache: true
+
+      - name: Install
+        run: |
+          make install
+
+      - name: Build
+        run: |
+          make build
+
+      - name: Test
+        run: |
+          make test
