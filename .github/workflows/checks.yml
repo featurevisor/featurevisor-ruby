@@ -37,3 +37,17 @@ jobs:
       - name: Test
         run: |
           make test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Setup Featurevisor example-1 project
+        run: |
+          mkdir example-1
+          (cd example-1 && npx @featurevisor/cli@2.x init --example=1)
+          (cd example-1 && npm install)
+          (cd example-1 && npx featurevisor test)
+
+      - name: Run Featurevisor project tests against Ruby SDK
+        run: ./bin/featurevisor test --projectDirectoryPath=./example-1
