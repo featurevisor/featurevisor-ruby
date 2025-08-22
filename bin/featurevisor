@@ -1,0 +1,18 @@
+#!/usr/bin/env ruby
+
+# CLI for the featurevisor gem
+# Usage: featurevisor [command] [options]
+
+# Add the lib directory to the load path so we can require the featurevisor gem
+$LOAD_PATH.unshift(File.join(File.dirname(__FILE__), "..", "lib"))
+
+require "featurevisor"
+require_relative "cli"
+
+if ARGV.empty?
+  FeaturevisorCLI.show_help
+  exit 0
+end
+
+# Run the CLI with the provided arguments
+FeaturevisorCLI.run(ARGV)
