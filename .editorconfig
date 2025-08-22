@@ -1,0 +1,74 @@
+# EditorConfig is awesome: https://EditorConfig.org
+
+# top-most EditorConfig file
+root = true
+
+# Unix-style newlines with a newline ending every file
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Ruby files
+[*.rb]
+indent_style = space
+indent_size = 2
+
+# Ruby ERB files
+[*.erb]
+indent_style = space
+indent_size = 2
+
+# Ruby Gemfile
+[Gemfile]
+indent_style = space
+indent_size = 2
+
+# Ruby gemspec files
+[*.gemspec]
+indent_style = space
+indent_size = 2
+
+# Ruby Rakefile
+[Rakefile]
+indent_style = space
+indent_size = 2
+
+# Ruby test files
+[spec/**/*.rb]
+indent_style = space
+indent_size = 2
+
+# Ruby test files (alternative naming)
+[test/**/*.rb]
+indent_style = space
+indent_size = 2
+
+# Markdown files
+[*.md]
+trim_trailing_whitespace = false
+
+# YAML files
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# JSON files
+[*.json]
+indent_style = space
+indent_size = 2
+
+# Shell scripts
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# Makefiles (must use tabs)
+[Makefile]
+indent_style = tab
+
+# Git ignore files
+[.gitignore]
+indent_style = space
+indent_size = 2
