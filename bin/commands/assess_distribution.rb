@@ -160,25 +160,11 @@ module FeaturevisorCLI
       end
 
       def create_instance(datafile)
-        # Convert datafile to proper format for the SDK
-        symbolized_datafile = symbolize_keys(datafile)
-
         # Create SDK instance
         Featurevisor.create_instance(
-          datafile: symbolized_datafile,
+          datafile: datafile,
           log_level: get_logger_level
         )
-      end
-
-      def symbolize_keys(obj)
-        case obj
-        when Hash
-          obj.transform_keys(&:to_sym).transform_values { |v| symbolize_keys(v) }
-        when Array
-          obj.map { |item| symbolize_keys(item) }
-        else
-          obj
-        end
       end
 
       def get_logger_level

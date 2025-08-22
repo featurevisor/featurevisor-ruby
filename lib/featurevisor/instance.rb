@@ -42,7 +42,7 @@ module Featurevisor
 
       if options[:datafile]
         @datafile_reader = Featurevisor::DatafileReader.new(
-          datafile: options[:datafile].is_a?(String) ? JSON.parse(options[:datafile]) : options[:datafile],
+          datafile: parse_datafile(options[:datafile]),
           logger: @logger
         )
       end
@@ -61,7 +61,7 @@ module Featurevisor
     def set_datafile(datafile)
       begin
         new_datafile_reader = Featurevisor::DatafileReader.new(
-          datafile: datafile.is_a?(String) ? JSON.parse(datafile) : datafile,
+          datafile: parse_datafile(datafile),
           logger: @logger
         )
 
@@ -408,6 +408,32 @@ module Featurevisor
     end
 
     private
+
+    # Parse and symbolize datafile keys
+    # @param datafile [Hash, String] Datafile content or JSON string
+    # @return [Hash] Datafile with symbolized keys
+    def parse_datafile(datafile)
+      if datafile.is_a?(String)
+        parsed = JSON.parse(datafile)
+        symbolize_keys(parsed)
+      else
+        symbolize_keys(datafile)
+      end
+    end
+
+    # Recursively symbolize hash keys
+    # @param obj [Object] Object to symbolize keys for
+    # @return [Object] Object with symbolized keys
+    def symbolize_keys(obj)
+      case obj
+      when Hash
+        obj.transform_keys(&:to_sym).transform_values { |v| symbolize_keys(v) }
+      when Array
+        obj.map { |v| symbolize_keys(v) }
+      else
+        obj
+      end
+    end
 
     # Get evaluation dependencies
     # @param context [Hash] Context

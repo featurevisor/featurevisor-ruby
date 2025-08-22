@@ -161,12 +161,9 @@ module FeaturevisorCLI
         environments.each do |environment|
           datafile = datafiles_by_environment[environment]
 
-          # Convert string keys to symbols for the SDK
-          symbolized_datafile = symbolize_keys(datafile)
-
           # Create SDK instance
           instance = Featurevisor.create_instance(
-            datafile: symbolized_datafile,
+            datafile: datafile,
             log_level: level,
             hooks: [
               {
@@ -214,10 +211,9 @@ module FeaturevisorCLI
                 # If "at" parameter is provided, create a new instance with the specific hook
                 if assertion["at"]
                   datafile = datafiles_by_environment[environment]
-                  symbolized_datafile = symbolize_keys(datafile)
 
                   instance = Featurevisor.create_instance(
-                    datafile: symbolized_datafile,
+                    datafile: datafile,
                     log_level: level,
                     hooks: [
                       {
@@ -549,7 +545,7 @@ module FeaturevisorCLI
 
         # Create SDK instance for segment testing
         instance = Featurevisor.create_instance(
-          datafile: symbolize_keys(datafile),
+          datafile: datafile,
           log_level: level
         )
 
@@ -765,16 +761,7 @@ module FeaturevisorCLI
         end
       end
 
-      def symbolize_keys(obj)
-        case obj
-        when Hash
-          obj.transform_keys(&:to_sym).transform_values { |v| symbolize_keys(v) }
-        when Array
-          obj.map { |v| symbolize_keys(v) }
-        else
-          obj
-        end
-      end
+
 
       def execute_command(command)
         stdout, stderr, status = Open3.capture3(command)

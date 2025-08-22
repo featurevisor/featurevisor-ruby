@@ -1197,4 +1197,74 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("test", { userId: "123", country: "nl" })).to be true
     expect(sdk.is_enabled("test", { userId: "123", country: "us", device: "iphone" })).to be true
   end
+
+  it "should automatically symbolize keys when parsing JSON string datafile" do
+    json_datafile = '{
+      "schemaVersion": "2",
+      "revision": "1.0",
+      "features": {
+        "test": {
+          "key": "test",
+          "bucketBy": "userId",
+          "variations": [
+            { "value": "control" },
+            { "value": "treatment" }
+          ],
+          "traffic": [
+            {
+              "key": "1",
+              "segments": "*",
+              "percentage": 100000,
+              "allocation": [
+                { "variation": "control", "range": [0, 100000] },
+                { "variation": "treatment", "range": [0, 0] }
+              ]
+            }
+          ]
+        }
+      },
+      "segments": {}
+    }'
+
+    sdk = Featurevisor.create_instance(datafile: json_datafile)
+
+    expect(sdk.get_revision).to eq("1.0")
+    expect(sdk.get_feature("test")).to be_a(Hash)
+    expect(sdk.get_feature("test")[:key]).to eq("test")
+    expect(sdk.get_feature("test")[:bucketBy]).to eq("userId")
+    expect(sdk.is_enabled("test", { userId: "123" })).to be true
+    expect(sdk.get_variation("test", { userId: "123" })).to eq("control")
+  end
+
+  it "should automatically symbolize keys when setting JSON string datafile" do
+    sdk = Featurevisor.create_instance
+
+    json_datafile = '{
+      "schemaVersion": "2",
+      "revision": "2.0",
+      "features": {
+        "newFeature": {
+          "key": "newFeature",
+          "bucketBy": "userId",
+          "traffic": [
+            {
+              "key": "1",
+              "segments": "*",
+              "percentage": 100000,
+              "allocation": []
+            }
+          ]
+        }
+      },
+      "segments": {}
+    }'
+
+    sdk.set_datafile(json_datafile)
+
+    expect(sdk.get_revision).to eq("2.0")
+    expect(sdk.get_feature("newFeature")).to be_a(Hash)
+    expect(sdk.get_feature("newFeature")[:key]).to eq("newFeature")
+    expect(sdk.get_feature("newFeature")[:bucketBy]).to eq("userId")
+    expect(sdk.is_enabled("newFeature", { userId: "123" })).to be true
+  end
 end
