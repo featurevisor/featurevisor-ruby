@@ -711,6 +711,7 @@ To install this gem onto your local machine, run `bundle exec rake install`. To 
 ### Releasing
 
 - Update version in `lib/featurevisor/version.rb`
+- Run `bundle install`
 - Push commit to `main` branch
 - Wait for CI to complete
 - Tag the release with the version number
