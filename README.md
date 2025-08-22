@@ -81,12 +81,27 @@ require 'json'
 # Fetch datafile from URL
 datafile_url = 'https://cdn.yoursite.com/datafile.json'
 response = Net::HTTP.get_response(URI(datafile_url))
-datafile_content = JSON.parse(response.body)
+
+# Parse JSON with symbolized keys (required)
+datafile_content = JSON.parse(response.body, symbolize_names: true)
 
 # Create SDK instance
 f = Featurevisor.create_instance(
   datafile: datafile_content
 )
+```
+
+**Important**: When parsing JSON datafiles, you must use `symbolize_names: true` to ensure proper key handling by the SDK.
+
+Alternatively, you can pass a JSON string directly and the SDK will parse it automatically:
+
+```ruby
+# Option 1: Parse JSON yourself (recommended)
+datafile_content = JSON.parse(json_string, symbolize_names: true)
+f = Featurevisor.create_instance(datafile: datafile_content)
+
+# Option 2: Pass JSON string directly (automatic parsing)
+f = Featurevisor.create_instance(datafile: json_string)
 ```
 
 ## Evaluation types
@@ -334,8 +349,15 @@ f.set_sticky({
 You may also initialize the SDK without passing `datafile`, and set it later on:
 
 ```ruby
+# Parse with symbolized keys before setting
+datafile_content = JSON.parse(json_string, symbolize_names: true)
 f.set_datafile(datafile_content)
+
+# Or pass JSON string directly for automatic parsing
+f.set_datafile(json_string)
 ```
+
+**Important**: When calling `set_datafile()`, ensure JSON is parsed with `symbolize_names: true` if you're parsing it yourself.
 
 ### Updating datafile
 

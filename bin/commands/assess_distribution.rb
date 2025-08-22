@@ -147,7 +147,7 @@ module FeaturevisorCLI
         end
 
         begin
-          JSON.parse(stdout)
+          JSON.parse(stdout, symbolize_names: true)
         rescue JSON::ParserError => e
           puts "Error: Failed to parse datafile JSON: #{e.message}"
           exit 1

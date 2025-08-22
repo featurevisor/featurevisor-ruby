@@ -19,13 +19,13 @@ module FeaturevisorCLI
 
         # Get project configuration
         config = get_config
-        environments = config["environments"] || []
+        environments = config[:environments] || []
         segments_by_key = get_segments
 
         # Use CLI schemaVersion option or fallback to config
         schema_version = @options.schema_version
         if schema_version.nil? || schema_version.empty?
-          schema_version = config["schemaVersion"]
+          schema_version = config[:schemaVersion]
         end
 
         # Build datafiles for all environments
@@ -57,7 +57,7 @@ module FeaturevisorCLI
         config_output = execute_command(command)
 
         begin
-          JSON.parse(config_output)
+          JSON.parse(config_output, symbolize_names: true)
         rescue JSON::ParserError => e
           puts "Error: Failed to parse config JSON: #{e.message}"
           puts "Command output: #{config_output}"
@@ -71,11 +71,11 @@ module FeaturevisorCLI
         segments_output = execute_command(command)
 
         begin
-          segments = JSON.parse(segments_output)
+          segments = JSON.parse(segments_output, symbolize_names: true)
           segments_by_key = {}
           segments.each do |segment|
-            if segment["key"]
-              segments_by_key[segment["key"]] = segment
+            if segment[:key]
+              segments_by_key[segment[:key]] = segment
             end
           end
           segments_by_key
@@ -110,7 +110,7 @@ module FeaturevisorCLI
           datafile_output = execute_command(command)
 
           begin
-            datafile = JSON.parse(datafile_output)
+            datafile = JSON.parse(datafile_output, symbolize_names: true)
             datafiles_by_environment[environment] = datafile
           rescue JSON::ParserError => e
             puts "Error: Failed to parse datafile JSON for #{environment}: #{e.message}"
@@ -147,7 +147,7 @@ module FeaturevisorCLI
         tests_output = execute_command(command)
 
         begin
-          JSON.parse(tests_output)
+          JSON.parse(tests_output, symbolize_names: true)
         rescue JSON::ParserError => e
           puts "Error: Failed to parse tests JSON: #{e.message}"
           puts "Command output: #{tests_output}"
@@ -186,8 +186,8 @@ module FeaturevisorCLI
         failed_assertions_count = 0
 
         tests.each do |test|
-          test_key = test["key"]
-          assertions = test["assertions"] || []
+          test_key = test[:key]
+          assertions = test[:assertions] || []
           results = ""
           test_has_error = false
           test_duration = 0.0
@@ -196,8 +196,8 @@ module FeaturevisorCLI
             if assertion.is_a?(Hash)
               test_result = nil
 
-              if test["feature"]
-                environment = assertion["environment"]
+              if test[:feature]
+                environment = assertion[:environment]
                 instance = sdk_instances_by_environment[environment]
 
                 # Show datafile if requested
@@ -209,7 +209,7 @@ module FeaturevisorCLI
                 end
 
                 # If "at" parameter is provided, create a new instance with the specific hook
-                if assertion["at"]
+                if assertion[:at]
                   datafile = datafiles_by_environment[environment]
 
                   instance = Featurevisor.create_instance(
@@ -221,7 +221,7 @@ module FeaturevisorCLI
                         bucket_value: ->(options) do
                           # Match JavaScript implementation: assertion.at * (MAX_BUCKETED_NUMBER / 100)
                           # MAX_BUCKETED_NUMBER is 100000, so this becomes assertion.at * 1000
-                          at = assertion["at"]
+                          at = assertion[:at]
                           if at.is_a?(Numeric)
                             (at * 1000).to_i
                           else
@@ -233,9 +233,9 @@ module FeaturevisorCLI
                   )
                 end
 
-                test_result = run_test_feature(assertion, test["feature"], instance, level)
-              elsif test["segment"]
-                segment_key = test["segment"]
+                test_result = run_test_feature(assertion, test[:feature], instance, level)
+              elsif test[:segment]
+                segment_key = test[:segment]
                 segment = segments_by_key[segment_key]
                 if segment.is_a?(Hash)
                   test_result = run_test_segment(assertion, segment, level)
@@ -281,8 +281,8 @@ module FeaturevisorCLI
       end
 
       def run_test_feature(assertion, feature_key, instance, level)
-        context = parse_context(assertion["context"])
-        sticky = parse_sticky(assertion["sticky"])
+        context = parse_context(assertion[:context])
+        sticky = parse_sticky(assertion[:sticky])
 
         # Set context and sticky for this assertion
         instance.set_context(context, false)
@@ -298,8 +298,8 @@ module FeaturevisorCLI
         start_time = Time.now
 
         # Test expectedToBeEnabled
-        if assertion.key?("expectedToBeEnabled")
-          expected_to_be_enabled = assertion["expectedToBeEnabled"]
+        if assertion.key?(:expectedToBeEnabled)
+          expected_to_be_enabled = assertion[:expectedToBeEnabled]
           is_enabled = instance.is_enabled(feature_key, context, override_options)
 
           if is_enabled != expected_to_be_enabled
@@ -309,8 +309,8 @@ module FeaturevisorCLI
         end
 
         # Test expectedVariation
-        if assertion.key?("expectedVariation")
-          expected_variation = assertion["expectedVariation"]
+        if assertion.key?(:expectedVariation)
+          expected_variation = assertion[:expectedVariation]
           variation = instance.get_variation(feature_key, context, override_options)
 
           variation_value = variation.nil? ? nil : variation
@@ -321,12 +321,12 @@ module FeaturevisorCLI
         end
 
         # Test expectedVariables
-        if assertion["expectedVariables"]
-          expected_variables = assertion["expectedVariables"]
+        if assertion[:expectedVariables]
+          expected_variables = assertion[:expectedVariables]
           expected_variables.each do |variable_key, expected_value|
             # Set default variable value for this specific variable
-            if assertion["defaultVariableValues"] && assertion["defaultVariableValues"][variable_key]
-              override_options[:default_variable_value] = assertion["defaultVariableValues"][variable_key]
+            if assertion[:defaultVariableValues] && assertion[:defaultVariableValues][variable_key]
+              override_options[:default_variable_value] = assertion[:defaultVariableValues][variable_key]
             end
 
             actual_value = instance.get_variable(feature_key, variable_key, context, override_options)
@@ -365,13 +365,13 @@ module FeaturevisorCLI
         end
 
         # Test expectedEvaluations
-        if assertion["expectedEvaluations"]
-          expected_evaluations = assertion["expectedEvaluations"]
+        if assertion[:expectedEvaluations]
+          expected_evaluations = assertion[:expectedEvaluations]
 
           # Test flag evaluations
-          if expected_evaluations["flag"]
+          if expected_evaluations[:flag]
             evaluation = instance.evaluate_flag(feature_key, context, override_options)
-            expected_evaluations["flag"].each do |key, expected_value|
+            expected_evaluations[:flag].each do |key, expected_value|
               actual_value = get_evaluation_value(evaluation, key)
               if !compare_values(actual_value, expected_value)
                 has_error = true
@@ -381,9 +381,9 @@ module FeaturevisorCLI
           end
 
           # Test variation evaluations
-          if expected_evaluations["variation"]
+          if expected_evaluations[:variation]
             evaluation = instance.evaluate_variation(feature_key, context, override_options)
-            expected_evaluations["variation"].each do |key, expected_value|
+            expected_evaluations[:variation].each do |key, expected_value|
               actual_value = get_evaluation_value(evaluation, key)
               if !compare_values(actual_value, expected_value)
                 has_error = true
@@ -393,8 +393,8 @@ module FeaturevisorCLI
           end
 
           # Test variable evaluations
-          if expected_evaluations["variables"]
-            expected_evaluations["variables"].each do |variable_key, expected_eval|
+          if expected_evaluations[:variables]
+            expected_evaluations[:variables].each do |variable_key, expected_eval|
               if expected_eval.is_a?(Hash)
                 evaluation = instance.evaluate_variable(feature_key, variable_key, context, override_options)
                 expected_eval.each do |key, expected_value|
@@ -410,10 +410,10 @@ module FeaturevisorCLI
         end
 
         # Test children
-        if assertion["children"]
-          assertion["children"].each do |child|
+        if assertion[:children]
+          assertion[:children].each do |child|
             if child.is_a?(Hash)
-              child_context = parse_context(child["context"])
+              child_context = parse_context(child[:context])
 
               # Create override options for child with sticky values
               child_override_options = create_override_options(child)
@@ -456,8 +456,8 @@ module FeaturevisorCLI
         start_time = Time.now
 
         # Test expectedToBeEnabled
-        if assertion.key?("expectedToBeEnabled")
-          expected_to_be_enabled = assertion["expectedToBeEnabled"]
+        if assertion.key?(:expectedToBeEnabled)
+          expected_to_be_enabled = assertion[:expectedToBeEnabled]
           is_enabled = instance.is_enabled(feature_key, context, override_options)
 
           if is_enabled != expected_to_be_enabled
@@ -467,8 +467,8 @@ module FeaturevisorCLI
         end
 
         # Test expectedVariation
-        if assertion.key?("expectedVariation")
-          expected_variation = assertion["expectedVariation"]
+        if assertion.key?(:expectedVariation)
+          expected_variation = assertion[:expectedVariation]
           variation = instance.get_variation(feature_key, context, override_options)
 
           variation_value = variation.nil? ? nil : variation
@@ -479,12 +479,12 @@ module FeaturevisorCLI
         end
 
         # Test expectedVariables
-        if assertion["expectedVariables"]
-          expected_variables = assertion["expectedVariables"]
+        if assertion[:expectedVariables]
+          expected_variables = assertion[:expectedVariables]
           expected_variables.each do |variable_key, expected_value|
             # Set default variable value for this specific variable
-            if assertion["defaultVariableValues"] && assertion["defaultVariableValues"][variable_key]
-              override_options[:default_variable_value] = assertion["defaultVariableValues"][variable_key]
+            if assertion[:defaultVariableValues] && assertion[:defaultVariableValues][variable_key]
+              override_options[:default_variable_value] = assertion[:defaultVariableValues][variable_key]
             end
 
             actual_value = instance.get_variable(feature_key, variable_key, context, override_options)
@@ -532,8 +532,8 @@ module FeaturevisorCLI
       end
 
       def run_test_segment(assertion, segment, level)
-        context = parse_context(assertion["context"])
-        conditions = segment["conditions"]
+        context = parse_context(assertion[:context])
+        conditions = segment[:conditions]
 
         # Create a minimal datafile for segment testing
         datafile = {
@@ -553,8 +553,8 @@ module FeaturevisorCLI
         errors = ""
         start_time = Time.now
 
-        if assertion.key?("expectedToMatch")
-          expected_to_match = assertion["expectedToMatch"]
+        if assertion.key?(:expectedToMatch)
+          expected_to_match = assertion[:expectedToMatch]
           actual = instance.instance_variable_get(:@datafile_reader).all_conditions_are_matched(conditions, context)
 
           if actual != expected_to_match
@@ -589,16 +589,16 @@ module FeaturevisorCLI
             if value.is_a?(Hash)
               evaluated_feature = {}
 
-              if value.key?("enabled")
-                evaluated_feature[:enabled] = value["enabled"]
+              if value.key?(:enabled)
+                evaluated_feature[:enabled] = value[:enabled]
               end
 
-              if value.key?("variation")
-                evaluated_feature[:variation] = value["variation"]
+              if value.key?(:variation)
+                evaluated_feature[:variation] = value[:variation]
               end
 
-              if value["variables"] && value["variables"].is_a?(Hash)
-                evaluated_feature[:variables] = value["variables"].transform_keys(&:to_sym)
+              if value[:variables] && value[:variables].is_a?(Hash)
+                evaluated_feature[:variables] = value[:variables].transform_keys(&:to_sym)
               end
 
               sticky_features[key.to_sym] = evaluated_feature
@@ -614,8 +614,8 @@ module FeaturevisorCLI
       def create_override_options(assertion)
         options = {}
 
-        if assertion["defaultVariationValue"]
-          options[:default_variation_value] = assertion["defaultVariationValue"]
+        if assertion[:defaultVariationValue]
+          options[:default_variation_value] = assertion[:defaultVariationValue]
         end
 
         options

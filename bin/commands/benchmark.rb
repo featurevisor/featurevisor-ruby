@@ -120,7 +120,7 @@ module FeaturevisorCLI
 
         # Parse the JSON output
         begin
-          JSON.parse(datafile_output)
+          JSON.parse(datafile_output, symbolize_names: true)
         rescue JSON::ParserError => e
           puts "Error: Failed to parse datafile JSON: #{e.message}"
           puts "Command output: #{datafile_output}"

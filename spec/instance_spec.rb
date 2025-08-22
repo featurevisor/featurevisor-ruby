@@ -1198,7 +1198,7 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("test", { userId: "123", country: "us", device: "iphone" })).to be true
   end
 
-  it "should automatically symbolize keys when parsing JSON string datafile" do
+  it "should handle JSON string datafile with automatic parsing" do
     json_datafile = '{
       "schemaVersion": "2",
       "revision": "1.0",
@@ -1236,7 +1236,7 @@ RSpec.describe "sdk: instance" do
     expect(sdk.get_variation("test", { userId: "123" })).to eq("control")
   end
 
-  it "should automatically symbolize keys when setting JSON string datafile" do
+  it "should handle JSON string when setting datafile" do
     sdk = Featurevisor.create_instance
 
     json_datafile = '{
@@ -1266,5 +1266,36 @@ RSpec.describe "sdk: instance" do
     expect(sdk.get_feature("newFeature")[:key]).to eq("newFeature")
     expect(sdk.get_feature("newFeature")[:bucketBy]).to eq("userId")
     expect(sdk.is_enabled("newFeature", { userId: "123" })).to be true
+  end
+
+  it "should work with manually parsed JSON using symbolize_names: true" do
+    json_string = '{
+      "schemaVersion": "2",
+      "revision": "3.0",
+      "features": {
+        "manualTest": {
+          "key": "manualTest",
+          "bucketBy": "userId",
+          "traffic": [
+            {
+              "key": "1",
+              "segments": "*",
+              "percentage": 100000,
+              "allocation": []
+            }
+          ]
+        }
+      },
+      "segments": {}
+    }'
+
+    # Parse with symbolize_names: true as documented
+    datafile = JSON.parse(json_string, symbolize_names: true)
+    sdk = Featurevisor.create_instance(datafile: datafile)
+
+    expect(sdk.get_revision).to eq("3.0")
+    expect(sdk.get_feature("manualTest")).to be_a(Hash)
+    expect(sdk.get_feature("manualTest")[:key]).to eq("manualTest")
+    expect(sdk.is_enabled("manualTest", { userId: "123" })).to be true
   end
 end
