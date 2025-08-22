@@ -46,6 +46,7 @@ This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 proje
 - [Development](#development)
   - [Setting up](#setting-up)
   - [Running tests](#running-tests)
+  - [Releasing](#releasing)
 - [License](#license)
 
 ## Installation
@@ -706,6 +707,14 @@ $ bundle exec rspec
 ```
 
 To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+
+### Releasing
+
+- Update version in `lib/featurevisor/version.rb`
+- Push commit to `main` branch
+- Wait for CI to complete
+- Tag the release with the version number
+- This will trigger a new release to RubyGems
 
 ## License
 

@@ -1,0 +1,29 @@
+name: Publish to RubyGems
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+          rubygems: ${{ secrets.RUBYGEMS_API_KEY }}
+
+      - name: Build
+        run: |
+          make build
+          ls -l *.gem
+
+      - name: Push to RubyGems
+        run: |
+          gem push *.gem
