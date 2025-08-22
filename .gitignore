@@ -92,3 +92,5 @@ desktop.ini
 
 # Ignore application configuration
 /config/application.yml
+
+example-1

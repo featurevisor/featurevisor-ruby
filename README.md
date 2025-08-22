@@ -642,7 +642,7 @@ f.close()
 This package also provides a CLI tool for running your Featurevisor [project](https://featurevisor.com/docs/projects/)'s test specs and benchmarking against this Ruby SDK.
 
 - Global installation: you can access it as `featurevisor`
-- Local installation: you can access it as `vendor/bundle/ruby/X.Y.Z/bin/featurevisor`
+- Local installation: you can access it as `bundle exec featurevisor`
 - From this repository: you can access it as `bin/featurevisor`
 
 ### Test
@@ -650,13 +650,13 @@ This package also provides a CLI tool for running your Featurevisor [project](ht
 Learn more about testing [here](https://featurevisor.com/docs/testing/).
 
 ```bash
-featurevisor test --projectDirectoryPath="/absolute/path/to/your/featurevisor/project"
+$ bundle exec featurevisor test --projectDirectoryPath="/absolute/path/to/your/featurevisor/project"
 ```
 
 Additional options that are available:
 
 ```bash
-featurevisor test \
+$ bundle exec featurevisor test \
   --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
   --quiet|verbose \
   --onlyFailures \
@@ -669,7 +669,7 @@ featurevisor test \
 Learn more about benchmarking [here](https://featurevisor.com/docs/cmd/#benchmarking).
 
 ```bash
-featurevisor benchmark \
+$ bundle exec featurevisor benchmark \
   --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
   --environment="production" \
   --feature="myFeatureKey" \
@@ -682,7 +682,7 @@ featurevisor benchmark \
 Learn more about assessing distribution [here](https://featurevisor.com/docs/cmd/#assess-distribution).
 
 ```bash
-featurevisor assess-distribution \
+$ bundle exec featurevisor assess-distribution \
   --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
   --environment=production \
   --feature=foo \
@@ -702,7 +702,7 @@ After checking out the repo, run `bin/setup` to install dependencies. Then, run 
 ### Running tests
 
 ```bash
-bundle exec rspec
+$ bundle exec rspec
 ```
 
 To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
