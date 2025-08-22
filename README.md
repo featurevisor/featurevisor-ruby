@@ -715,7 +715,7 @@ To install this gem onto your local machine, run `bundle exec rake install`. To 
 - Push commit to `main` branch
 - Wait for CI to complete
 - Tag the release with the version number
-- This will trigger a new release to RubyGems
+- This will trigger a new release to [RubyGems](https://rubygems.org/gems/featurevisor)
 
 ## License
 
