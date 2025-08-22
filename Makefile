@@ -1,5 +1,6 @@
 install:
-	bundle install --path vendor/bundle
+	bundle config set path 'vendor/bundle'
+	bundle install
 
 build:
 	gem build featurevisor.gemspec
