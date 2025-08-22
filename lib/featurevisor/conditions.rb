@@ -53,12 +53,12 @@ module Featurevisor
         if value.is_a?(Array) && (context_value_from_path.is_a?(String) || context_value_from_path.is_a?(Numeric) || context_value_from_path.nil?)
           # Check if the attribute key actually exists in the context
           key_exists = context.key?(attribute.to_sym) || context.key?(attribute.to_s)
-          
+
           # If key doesn't exist, notIn should fail (return false), in should also fail
           if !key_exists
             return false
           end
-          
+
           value_in_context = context_value_from_path.to_s
 
           if operator == "in"

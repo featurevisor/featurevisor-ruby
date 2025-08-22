@@ -183,6 +183,8 @@ module Featurevisor
         end
       end
 
+
+
       if conditions.is_a?(Array)
         return conditions.all? { |c| all_conditions_are_matched(c, context) }
       end
@@ -245,6 +247,8 @@ module Featurevisor
             all_segments_are_matched({ "and" => group_segments["not"] }, context) == false
           end
         end
+
+
       end
 
       if group_segments.is_a?(Array)

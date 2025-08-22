@@ -78,9 +78,9 @@ module FeaturevisorCLI
           # Evaluate flag
           flag_evaluation = instance.is_enabled(@options.feature, context_copy)
           if flag_evaluation
-            flag_evaluations["enabled"] += 1
+            flag_evaluations[:enabled] += 1
           else
-            flag_evaluations["disabled"] += 1
+            flag_evaluations[:disabled] += 1
           end
 
           # Evaluate variation if feature has variations

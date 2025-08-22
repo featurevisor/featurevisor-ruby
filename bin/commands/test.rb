@@ -246,12 +246,12 @@ module FeaturevisorCLI
                 test_duration += test_result[:duration]
 
                 if test_result[:has_error]
-                  results += "  ✘ #{assertion['description']} (#{(test_result[:duration] * 1000).round(2)}ms)\n"
+                  results += "  ✘ #{assertion[:description]} (#{(test_result[:duration] * 1000).round(2)}ms)\n"
                   results += test_result[:errors]
                   test_has_error = true
                   failed_assertions_count += 1
                 else
-                  results += "  ✔ #{assertion['description']} (#{(test_result[:duration] * 1000).round(2)}ms)\n"
+                  results += "  ✔ #{assertion[:description]} (#{(test_result[:duration] * 1000).round(2)}ms)\n"
                   passed_assertions_count += 1
                 end
               end
@@ -448,7 +448,7 @@ module FeaturevisorCLI
       end
 
       def run_test_feature_child(assertion, feature_key, instance, level)
-        context = parse_context(assertion["context"])
+        context = parse_context(assertion[:context])
         override_options = create_override_options(assertion)
 
         has_error = false
@@ -623,41 +623,41 @@ module FeaturevisorCLI
 
       def get_evaluation_value(evaluation, key)
         case key
-        when "type"
+        when :type
           evaluation[:type]
-        when "featureKey"
+        when :featureKey
           evaluation[:feature_key]
-        when "reason"
+        when :reason
           evaluation[:reason]
-        when "bucketKey"
+        when :bucketKey
           evaluation[:bucket_key]
-        when "bucketValue"
+        when :bucketValue
           evaluation[:bucket_value]
-        when "ruleKey"
+        when :ruleKey
           evaluation[:rule_key]
-        when "error"
+        when :error
           evaluation[:error]
-        when "enabled"
+        when :enabled
           evaluation[:enabled]
-        when "traffic"
+        when :traffic
           evaluation[:traffic]
-        when "forceIndex"
+        when :forceIndex
           evaluation[:force_index]
-        when "force"
+        when :force
           evaluation[:force]
-        when "required"
+        when :required
           evaluation[:required]
-        when "sticky"
+        when :sticky
           evaluation[:sticky]
-        when "variation"
+        when :variation
           evaluation[:variation]
-        when "variationValue"
+        when :variationValue
           evaluation[:variation_value]
-        when "variableKey"
+        when :variableKey
           evaluation[:variable_key]
-        when "variableValue"
+        when :variableValue
           evaluation[:variable_value]
-        when "variableSchema"
+        when :variableSchema
           evaluation[:variable_schema]
         else
           nil
