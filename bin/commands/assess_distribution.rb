@@ -58,8 +58,8 @@ module FeaturevisorCLI
 
         # Initialize evaluation counters
         flag_evaluations = {
-          "enabled" => 0,
-          "disabled" => 0
+          enabled: 0,
+          disabled: 0
         }
         variation_evaluations = {}
 
