@@ -42,7 +42,7 @@ module Featurevisor
 
       if options[:datafile]
         @datafile_reader = Featurevisor::DatafileReader.new(
-          datafile: options[:datafile].is_a?(String) ? JSON.parse(options[:datafile]) : options[:datafile],
+          datafile: options[:datafile].is_a?(String) ? JSON.parse(options[:datafile], symbolize_names: true) : options[:datafile],
           logger: @logger
         )
       end
@@ -61,7 +61,7 @@ module Featurevisor
     def set_datafile(datafile)
       begin
         new_datafile_reader = Featurevisor::DatafileReader.new(
-          datafile: datafile.is_a?(String) ? JSON.parse(datafile) : datafile,
+          datafile: datafile.is_a?(String) ? JSON.parse(datafile, symbolize_names: true) : datafile,
           logger: @logger
         )
 

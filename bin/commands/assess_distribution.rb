@@ -58,8 +58,8 @@ module FeaturevisorCLI
 
         # Initialize evaluation counters
         flag_evaluations = {
-          "enabled" => 0,
-          "disabled" => 0
+          enabled: 0,
+          disabled: 0
         }
         variation_evaluations = {}
 
@@ -78,9 +78,9 @@ module FeaturevisorCLI
           # Evaluate flag
           flag_evaluation = instance.is_enabled(@options.feature, context_copy)
           if flag_evaluation
-            flag_evaluations["enabled"] += 1
+            flag_evaluations[:enabled] += 1
           else
-            flag_evaluations["disabled"] += 1
+            flag_evaluations[:disabled] += 1
           end
 
           # Evaluate variation if feature has variations
@@ -147,7 +147,7 @@ module FeaturevisorCLI
         end
 
         begin
-          JSON.parse(stdout)
+          JSON.parse(stdout, symbolize_names: true)
         rescue JSON::ParserError => e
           puts "Error: Failed to parse datafile JSON: #{e.message}"
           exit 1
@@ -160,25 +160,11 @@ module FeaturevisorCLI
       end
 
       def create_instance(datafile)
-        # Convert datafile to proper format for the SDK
-        symbolized_datafile = symbolize_keys(datafile)
-
         # Create SDK instance
         Featurevisor.create_instance(
-          datafile: symbolized_datafile,
+          datafile: datafile,
           log_level: get_logger_level
         )
-      end
-
-      def symbolize_keys(obj)
-        case obj
-        when Hash
-          obj.transform_keys(&:to_sym).transform_values { |v| symbolize_keys(v) }
-        when Array
-          obj.map { |item| symbolize_keys(item) }
-        else
-          obj
-        end
       end
 
       def get_logger_level

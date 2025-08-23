@@ -120,7 +120,7 @@ module FeaturevisorCLI
 
         # Parse the JSON output
         begin
-          JSON.parse(datafile_output)
+          JSON.parse(datafile_output, symbolize_names: true)
         rescue JSON::ParserError => e
           puts "Error: Failed to parse datafile JSON: #{e.message}"
           puts "Command output: #{datafile_output}"
@@ -143,16 +143,13 @@ module FeaturevisorCLI
       end
 
       def create_instance(datafile)
-        # Convert string keys to symbols for the SDK
-        symbolized_datafile = symbolize_keys(datafile)
-
         # Create a real Featurevisor instance
         instance = Featurevisor.create_instance(
           log_level: get_logger_level
         )
 
         # Explicitly set the datafile
-        instance.set_datafile(symbolized_datafile)
+        instance.set_datafile(datafile)
 
         instance
       end
@@ -164,17 +161,6 @@ module FeaturevisorCLI
           "error"
         else
           "warn"
-        end
-      end
-
-      def symbolize_keys(obj)
-        case obj
-        when Hash
-          obj.transform_keys(&:to_sym).transform_values { |v| symbolize_keys(v) }
-        when Array
-          obj.map { |item| symbolize_keys(item) }
-        else
-          obj
         end
       end
 
