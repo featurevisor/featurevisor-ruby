@@ -49,6 +49,8 @@ This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 proje
   - [Releasing](#releasing)
 - [License](#license)
 
+<!-- FEATUREVISOR_DOCS_BEGIN -->
+
 ## Installation
 
 Add this line to your application's Gemfile:
@@ -715,6 +717,8 @@ $ bundle exec featurevisor assess-distribution \
   --populateUuid=deviceId \
   --n=1000
 ```
+
+<!-- FEATUREVISOR_DOCS_END -->
 
 ## Development
 
