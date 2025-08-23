@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    featurevisor (0.1.1)
+    featurevisor (0.2.0)
 
 GEM
   remote: https://rubygems.org/
