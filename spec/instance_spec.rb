@@ -1298,4 +1298,60 @@ RSpec.describe "sdk: instance" do
     expect(sdk.get_feature("manualTest")[:key]).to eq("manualTest")
     expect(sdk.is_enabled("manualTest", { userId: "123" })).to be true
   end
+
+  describe "get_value_by_type" do
+    let(:sdk) do
+      Featurevisor.create_instance(
+        datafile: {
+          schemaVersion: "2",
+          revision: "1.0",
+          features: {},
+          segments: {}
+        }
+      )
+    end
+
+    it "returns nil for type mismatch" do
+      expect(sdk.send(:get_value_by_type, 1, "string")).to be_nil
+    end
+
+    it "returns string as is for string type" do
+      expect(sdk.send(:get_value_by_type, "1", "string")).to eq("1")
+    end
+
+    it "returns boolean coercion result for boolean type" do
+      expect(sdk.send(:get_value_by_type, true, "boolean")).to be true
+      expect(sdk.send(:get_value_by_type, false, "boolean")).to be false
+      expect(sdk.send(:get_value_by_type, "true", "boolean")).to be false
+    end
+
+    it "returns object value for object type" do
+      expect(sdk.send(:get_value_by_type, { a: 1, b: 2 }, "object")).to eq({ a: 1, b: 2 })
+    end
+
+    it "returns value as is for json type" do
+      json = JSON.generate({ a: 1, b: 2 })
+      expect(sdk.send(:get_value_by_type, json, "json")).to eq(json)
+    end
+
+    it "returns array value for array type" do
+      expect(sdk.send(:get_value_by_type, %w[1 2 3], "array")).to eq(%w[1 2 3])
+    end
+
+    it "parses integer for integer type" do
+      expect(sdk.send(:get_value_by_type, "1", "integer")).to eq(1)
+    end
+
+    it "parses double for double type" do
+      expect(sdk.send(:get_value_by_type, "1.1", "double")).to eq(1.1)
+    end
+
+    it "returns nil when value is nil" do
+      expect(sdk.send(:get_value_by_type, nil, "string")).to be_nil
+    end
+
+    it "returns nil for unsupported value with string type" do
+      expect(sdk.send(:get_value_by_type, -> {}, "string")).to be_nil
+    end
+  end
 end

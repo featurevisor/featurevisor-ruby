@@ -141,4 +141,64 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
       expect(output.string).to include("Assertions: 0 passed, 1 failed")
     end
   end
+
+  describe "comparison helpers" do
+    it "compares empty hashes and arrays as equal" do
+      command = described_class.new(options)
+
+      expect(command.send(:compare_values, {}, {})).to be true
+      expect(command.send(:compare_values, [], [])).to be true
+    end
+
+    it "treats hash key order as irrelevant" do
+      command = described_class.new(options)
+
+      expect(command.send(:compare_values, { a: 1, b: 2 }, { b: 2, a: 1 })).to be true
+    end
+
+    it "handles nested hash and array equality correctly" do
+      command = described_class.new(options)
+
+      expect(
+        command.send(
+          :compare_values,
+          { a: { b: [1, { c: 2 }] }, d: 3 },
+          { a: { b: [1, { c: 2 }] }, d: 3 }
+        )
+      ).to be true
+
+      expect(
+        command.send(
+          :compare_values,
+          { a: { b: [1, { c: 2 }] }, d: 3 },
+          { a: { b: [1, { c: 4 }] }, d: 3 }
+        )
+      ).to be false
+    end
+
+    it "returns false for arrays with same elements in different order" do
+      command = described_class.new(options)
+
+      expect(command.send(:compare_values, [1, 2, 3], [3, 2, 1])).to be false
+    end
+
+    it "distinguishes nil hash values from missing keys" do
+      command = described_class.new(options)
+
+      expect(command.send(:compare_values, { a: nil }, {})).to be false
+    end
+
+    it "handles nil positions in arrays" do
+      command = described_class.new(options)
+
+      expect(command.send(:compare_values, [nil, 2], [nil, 2])).to be true
+      expect(command.send(:compare_values, [2, nil], [nil, 2])).to be false
+    end
+
+    it "returns false for different array lengths including extra nil at end" do
+      command = described_class.new(options)
+
+      expect(command.send(:compare_values, [1, 2], [1, 2, nil])).to be false
+    end
+  end
 end
