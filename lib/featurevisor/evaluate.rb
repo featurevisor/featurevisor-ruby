@@ -17,7 +17,8 @@ module Featurevisor
     VARIABLE_NOT_FOUND = "variable_not_found" # variable's schema is not defined in the feature
     VARIABLE_DEFAULT = "variable_default" # default variable value used
     VARIABLE_DISABLED = "variable_disabled" # feature is disabled, and variable's disabledValue is used
-    VARIABLE_OVERRIDE = "variable_override" # variable overridden from inside a variation
+    VARIABLE_OVERRIDE_VARIATION = "variable_override_variation" # variable overridden from inside a variation
+    VARIABLE_OVERRIDE_RULE = "variable_override_rule" # variable overridden from inside a rule
 
     # Common
     NO_MATCH = "no_match" # no rules matched
@@ -55,14 +56,14 @@ module Featurevisor
         evaluation = evaluate(result_options)
 
         # Default: variation
-        if options[:default_variation_value] &&
+        if options.key?(:default_variation_value) &&
            evaluation[:type] == "variation" &&
            evaluation[:variation_value].nil?
           evaluation[:variation_value] = options[:default_variation_value]
         end
 
         # Default: variable
-        if options[:default_variable_value] &&
+        if options.key?(:default_variable_value) &&
            evaluation[:type] == "variable" &&
            evaluation[:variable_value].nil?
           evaluation[:variable_value] = options[:default_variable_value]
@@ -132,10 +133,10 @@ module Featurevisor
             if type == "variable"
               if feature && variable_key &&
                  feature[:variablesSchema] &&
-                 (feature[:variablesSchema][variable_key] || feature[:variablesSchema][variable_key.to_sym])
-                variable_schema = feature[:variablesSchema][variable_key] || feature[:variablesSchema][variable_key.to_sym]
+                 has_key?(feature[:variablesSchema], variable_key)
+                variable_schema = fetch_with_symbol_key(feature[:variablesSchema], variable_key)
 
-                if variable_schema[:disabledValue]
+                if variable_schema.key?(:disabledValue)
                   # disabledValue: <value>
                   evaluation = {
                     type: type,
@@ -179,8 +180,8 @@ module Featurevisor
         end
 
         # Sticky
-        if sticky && (sticky[feature_key] || sticky[feature_key.to_sym])
-          sticky_feature = sticky[feature_key] || sticky[feature_key.to_sym]
+        if sticky && has_key?(sticky, feature_key)
+          sticky_feature = fetch_with_symbol_key(sticky, feature_key)
 
           # flag
           if type == "flag" && sticky_feature.key?(:enabled)
@@ -201,7 +202,7 @@ module Featurevisor
           if type == "variation"
             variation_value = sticky_feature[:variation]
 
-            if variation_value
+            unless variation_value.nil?
               evaluation = {
                 type: type,
                 feature_key: feature_key,
@@ -219,8 +220,8 @@ module Featurevisor
           if type == "variable" && variable_key
             variables = sticky_feature[:variables]
 
-            if variables && (variables[variable_key] || variables[variable_key.to_sym])
-              variable_value = variables[variable_key] || variables[variable_key.to_sym]
+            if variables && has_key?(variables, variable_key)
+              variable_value = fetch_with_symbol_key(variables, variable_key)
               evaluation = {
                 type: type,
                 feature_key: feature_key,
@@ -261,8 +262,8 @@ module Featurevisor
         variable_schema = nil
 
         if variable_key
-          if feature[:variablesSchema] && (feature[:variablesSchema][variable_key] || feature[:variablesSchema][variable_key.to_sym])
-            variable_schema = feature[:variablesSchema][variable_key] || feature[:variablesSchema][variable_key.to_sym]
+          if feature[:variablesSchema] && has_key?(feature[:variablesSchema], variable_key)
+            variable_schema = fetch_with_symbol_key(feature[:variablesSchema], variable_key)
           end
 
           # variable schema not found
@@ -343,8 +344,8 @@ module Featurevisor
           end
 
           # variable
-          if variable_key && force[:variables] && (force[:variables][variable_key] || force[:variables][variable_key.to_sym])
-            variable_value = force[:variables][variable_key] || force[:variables][variable_key.to_sym]
+          if variable_key && force[:variables] && has_key?(force[:variables], variable_key)
+            variable_value = fetch_with_symbol_key(force[:variables], variable_key)
             evaluation = {
               type: type,
               feature_key: feature_key,
@@ -385,8 +386,8 @@ module Featurevisor
 
               required_variation_value = nil
 
-              if required_variation_evaluation[:variation_value]
-                required_variation_value = required_variation_evaluation[:variation_value]
+              if has_key?(required_variation_evaluation, :variation_value)
+                required_variation_value = fetch_with_symbol_key(required_variation_evaluation, :variation_value)
               elsif required_variation_evaluation[:variation]
                 required_variation_value = required_variation_evaluation[:variation][:value]
               end
@@ -602,9 +603,49 @@ module Featurevisor
         if type == "variable" && variable_key
           # override from rule
           if matched_traffic &&
+             matched_traffic[:variableOverrides] &&
+             has_key?(matched_traffic[:variableOverrides], variable_key)
+            overrides = fetch_with_symbol_key(matched_traffic[:variableOverrides], variable_key)
+
+            override_index = overrides.find_index do |o|
+              if o[:conditions]
+                conditions = o[:conditions].is_a?(String) && o[:conditions] != "*" ? JSON.parse(o[:conditions]) : o[:conditions]
+                datafile_reader.all_conditions_are_matched(conditions, context)
+              elsif o[:segments]
+                segments = datafile_reader.parse_segments_if_stringified(o[:segments])
+                datafile_reader.all_segments_are_matched(segments, context)
+              else
+                false
+              end
+            end
+
+            unless override_index.nil?
+              override = overrides[override_index]
+
+              evaluation = {
+                type: type,
+                feature_key: feature_key,
+                reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE,
+                bucket_key: bucket_key,
+                bucket_value: bucket_value,
+                rule_key: matched_traffic[:key],
+                traffic: matched_traffic,
+                variable_key: variable_key,
+                variable_schema: variable_schema,
+                variable_value: override[:value],
+                variable_override_index: override_index
+              }
+
+              logger.debug("variable override from rule", evaluation)
+
+              return evaluation
+            end
+          end
+
+          if matched_traffic &&
              matched_traffic[:variables] &&
-             (matched_traffic[:variables][variable_key] || matched_traffic[:variables][variable_key.to_sym])
-            variable_value = matched_traffic[:variables][variable_key] || matched_traffic[:variables][variable_key.to_sym]
+             has_key?(matched_traffic[:variables], variable_key)
+            variable_value = fetch_with_symbol_key(matched_traffic[:variables], variable_key)
             evaluation = {
               type: type,
               feature_key: feature_key,
@@ -637,81 +678,38 @@ module Featurevisor
           if variation_value && feature[:variations].is_a?(Array)
             variation = feature[:variations].find { |v| v[:value] == variation_value }
 
-            if variation && variation[:variableOverrides] && (variation[:variableOverrides][variable_key] || variation[:variableOverrides][variable_key.to_sym])
-              overrides = variation[:variableOverrides][variable_key] || variation[:variableOverrides][variable_key.to_sym]
+            if variation && variation[:variableOverrides] && has_key?(variation[:variableOverrides], variable_key)
+              overrides = fetch_with_symbol_key(variation[:variableOverrides], variable_key)
 
-              logger.debug("checking variableOverrides", {
-                feature_key: feature_key,
-                variable_key: variable_key,
-                overrides: overrides,
-                context: context
-              })
-
-              override = overrides.find do |o|
-                logger.debug("evaluating override", {
-                  feature_key: feature_key,
-                  variable_key: variable_key,
-                  override: o,
-                  context: context
-                })
-
-                result = if o[:conditions]
-                  matched = datafile_reader.all_conditions_are_matched(
-                    o[:conditions].is_a?(String) && o[:conditions] != "*" ?
-                      JSON.parse(o[:conditions]) : o[:conditions],
-                    context
-                  )
-                  logger.debug("conditions match result", {
-                    feature_key: feature_key,
-                    variable_key: variable_key,
-                    conditions: o[:conditions],
-                    matched: matched
-                  })
-                  matched
+              override_index = overrides.find_index do |o|
+                if o[:conditions]
+                  conditions = o[:conditions].is_a?(String) && o[:conditions] != "*" ? JSON.parse(o[:conditions]) : o[:conditions]
+                  datafile_reader.all_conditions_are_matched(conditions, context)
                 elsif o[:segments]
                   segments = datafile_reader.parse_segments_if_stringified(o[:segments])
-                  matched = datafile_reader.all_segments_are_matched(segments, context)
-                  logger.debug("segments match result", {
-                    feature_key: feature_key,
-                    variable_key: variable_key,
-                    segments: o[:segments],
-                    parsed_segments: segments,
-                    matched: matched
-                  })
-                  matched
+                  datafile_reader.all_segments_are_matched(segments, context)
                 else
-                  logger.debug("override has no conditions or segments", {
-                    feature_key: feature_key,
-                    variable_key: variable_key,
-                    override: o
-                  })
                   false
                 end
-
-                logger.debug("override evaluation result", {
-                  feature_key: feature_key,
-                  variable_key: variable_key,
-                  result: result
-                })
-
-                result
               end
 
-              if override
+              unless override_index.nil?
+                override = overrides[override_index]
                 evaluation = {
                   type: type,
                   feature_key: feature_key,
-                  reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE,
+                  reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_VARIATION,
                   bucket_key: bucket_key,
                   bucket_value: bucket_value,
                   rule_key: matched_traffic&.[](:key),
                   traffic: matched_traffic,
                   variable_key: variable_key,
                   variable_schema: variable_schema,
-                  variable_value: override[:value]
+                  variable_value: override[:value],
+                  variable_override_index: override_index
                 }
 
-                logger.debug("variable override", evaluation)
+                logger.debug("variable override from variation", evaluation)
 
                 return evaluation
               end
@@ -719,8 +717,8 @@ module Featurevisor
 
             if variation &&
                variation[:variables] &&
-               (variation[:variables][variable_key] || variation[:variables][variable_key.to_sym])
-              variable_value = variation[:variables][variable_key] || variation[:variables][variable_key.to_sym]
+               has_key?(variation[:variables], variable_key)
+              variable_value = fetch_with_symbol_key(variation[:variables], variable_key)
               evaluation = {
                 type: type,
                 feature_key: feature_key,
@@ -813,6 +811,21 @@ module Featurevisor
 
         evaluation
       end
+    end
+
+    def self.fetch_with_symbol_key(obj, key)
+      return obj[key] if obj.is_a?(Hash) && obj.key?(key)
+
+      symbol_key = key.to_sym
+      return obj[symbol_key] if obj.is_a?(Hash) && obj.key?(symbol_key)
+
+      nil
+    end
+
+    def self.has_key?(obj, key)
+      return false unless obj.is_a?(Hash)
+
+      obj.key?(key) || obj.key?(key.to_sym)
     end
   end
 end

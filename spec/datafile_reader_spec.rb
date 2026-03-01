@@ -335,6 +335,33 @@ RSpec.describe Featurevisor::DatafileReader do
       ).to be false
     end
 
+    it "should match dutchMobileOrDesktopUsers2" do
+      group = groups.find { |g| g[:key] == "dutchMobileOrDesktopUsers2" }
+
+      # match
+      expect(
+        datafile_reader.all_segments_are_matched(group[:segments], {
+          country: "nl",
+          deviceType: "mobile"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_segments_are_matched(group[:segments], {
+          country: "nl",
+          deviceType: "desktop"
+        })
+      ).to be true
+
+      # not match
+      expect(datafile_reader.all_segments_are_matched(group[:segments], {})).to be false
+      expect(
+        datafile_reader.all_segments_are_matched(group[:segments], {
+          country: "de",
+          deviceType: "mobile"
+        })
+      ).to be false
+    end
+
     it "should match germanMobileUsers" do
       group = groups.find { |g| g[:key] == "germanMobileUsers" }
 

@@ -7,7 +7,7 @@ module FeaturevisorCLI
     attr_accessor :command, :assertion_pattern, :context, :environment, :feature,
                  :key_pattern, :n, :only_failures, :quiet, :variable, :variation,
                  :verbose, :inflate, :show_datafile, :schema_version, :project_directory_path,
-                 :populate_uuid
+                 :populate_uuid, :with_scopes, :with_tags
 
     def initialize
       @n = 1000
@@ -84,6 +84,14 @@ module FeaturevisorCLI
 
         opts.on("--schemaVersion=VERSION", "Schema version") do |v|
           options.schema_version = v
+        end
+
+        opts.on("--with-scopes", "--withScopes", "Test scoped assertions against scoped datafiles") do
+          options.with_scopes = true
+        end
+
+        opts.on("--with-tags", "--withTags", "Test tagged assertions against tagged datafiles") do
+          options.with_tags = true
         end
 
         opts.on("--projectDirectoryPath=PATH", "Project directory path") do |v|

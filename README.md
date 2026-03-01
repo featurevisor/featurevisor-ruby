@@ -41,6 +41,7 @@ This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 proje
 - [Close](#close)
 - [CLI usage](#cli-usage)
   - [Test](#test)
+  - [Test against local monorepo's example-1](#test-against-local-monorepos-example-1)
   - [Benchmark](#benchmark)
   - [Assess distribution](#assess-distribution)
 - [Development](#development)
@@ -383,7 +384,7 @@ require 'json'
 def update_datafile(f, datafile_url)
   loop do
     sleep(5 * 60) # 5 minutes
-    
+
     begin
       response = Net::HTTP.get_response(URI(datafile_url))
       datafile_content = JSON.parse(response.body)
@@ -683,10 +684,27 @@ Additional options that are available:
 ```bash
 $ bundle exec featurevisor test \
   --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
-  --quiet|verbose \
+  --quiet|--verbose \
   --onlyFailures \
   --keyPattern="myFeatureKey" \
-  --assertionPattern="#1"
+  --assertionPattern="#1" \
+  --with-scopes \
+  --with-tags
+```
+
+`--with-scopes` and `--with-tags` make the Ruby test runner build scoped/tagged datafiles in memory (via `npx featurevisor build --json`) and evaluate matching assertions against those exact datafiles.
+
+If an assertion references `scope` and `--with-scopes` is not provided, the runner still evaluates the assertion by merging that scope's configured context into the assertion context (without building scoped datafiles).
+
+For compatibility, camelCase aliases are also supported: `--withScopes` and `--withTags`.
+
+### Test against local monorepo's example-1
+
+```bash
+$ cd /absolute/path/to/featurevisor-ruby
+$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1
+$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-scopes
+$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-tags
 ```
 
 ### Benchmark

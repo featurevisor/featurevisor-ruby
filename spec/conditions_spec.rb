@@ -305,11 +305,50 @@ RSpec.describe Featurevisor::Conditions do
         expect(Featurevisor::Conditions.condition_is_matched(condition, context, get_regex)).to be true
       end
 
+      it "should handle semverNotEquals" do
+        condition = { attribute: "version", operator: "semverNotEquals", value: "1.0.0" }
+
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "2.0.0" }, get_regex)
+        ).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "1.0.0" }, get_regex)
+        ).to be false
+      end
+
+      it "should handle semverGreaterThanOrEquals" do
+        condition = { attribute: "version", operator: "semverGreaterThanOrEquals", value: "1.0.0" }
+
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "2.0.0" }, get_regex)
+        ).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "1.0.0" }, get_regex)
+        ).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "0.9.0" }, get_regex)
+        ).to be false
+      end
+
       it "should handle semverLessThan" do
         condition = { attribute: "version", operator: "semverLessThan", value: "1.0.0" }
         context = { version: "0.9.0" }
 
         expect(Featurevisor::Conditions.condition_is_matched(condition, context, get_regex)).to be true
+      end
+
+      it "should handle semverLessThanOrEquals" do
+        condition = { attribute: "version", operator: "semverLessThanOrEquals", value: "1.0.0" }
+
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "1.0.0" }, get_regex)
+        ).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "0.9.0" }, get_regex)
+        ).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(condition, { version: "1.1.0" }, get_regex)
+        ).to be false
       end
     end
 
@@ -350,6 +389,215 @@ RSpec.describe Featurevisor::Conditions do
 
         expect(Featurevisor::Conditions.condition_is_matched(condition, context, get_regex)).to be true
       end
+    end
+  end
+
+  describe "logical composition via datafile reader" do
+    it "should match with multiple conditions inside NOT" do
+      conditions = [
+        {
+          not: [
+            { attribute: "browser_type", operator: "equals", value: "chrome" },
+            { attribute: "browser_version", operator: "equals", value: "1.0" }
+          ]
+        }
+      ]
+
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "firefox",
+          browser_version: "2.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "2.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "1.0"
+        })
+      ).to be false
+    end
+
+    it "should match with OR inside AND" do
+      conditions = [
+        {
+          and: [
+            { attribute: "browser_type", operator: "equals", value: "chrome" },
+            {
+              or: [
+                { attribute: "browser_version", operator: "equals", value: "1.0" },
+                { attribute: "browser_version", operator: "equals", value: "2.0" }
+              ]
+            }
+          ]
+        }
+      ]
+
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "1.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "2.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "3.0"
+        })
+      ).to be false
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_version: "2.0"
+        })
+      ).to be false
+    end
+
+    it "should match with plain conditions, followed by OR inside AND" do
+      conditions = [
+        { attribute: "country", operator: "equals", value: "nl" },
+        {
+          and: [
+            { attribute: "browser_type", operator: "equals", value: "chrome" },
+            {
+              or: [
+                { attribute: "browser_version", operator: "equals", value: "1.0" },
+                { attribute: "browser_version", operator: "equals", value: "2.0" }
+              ]
+            }
+          ]
+        }
+      ]
+
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          country: "nl",
+          browser_type: "chrome",
+          browser_version: "1.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          country: "nl",
+          browser_type: "chrome",
+          browser_version: "2.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "3.0"
+        })
+      ).to be false
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          country: "us",
+          browser_version: "2.0"
+        })
+      ).to be false
+    end
+
+    it "should match with AND inside OR" do
+      conditions = [
+        {
+          or: [
+            { attribute: "browser_type", operator: "equals", value: "chrome" },
+            {
+              and: [
+                { attribute: "device_type", operator: "equals", value: "mobile" },
+                { attribute: "orientation", operator: "equals", value: "portrait" }
+              ]
+            }
+          ]
+        }
+      ]
+
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "chrome",
+          browser_version: "2.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "firefox",
+          device_type: "mobile",
+          orientation: "portrait"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "firefox",
+          browser_version: "2.0"
+        })
+      ).to be false
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "firefox",
+          device_type: "desktop"
+        })
+      ).to be false
+    end
+
+    it "should match with plain conditions, followed by AND inside OR" do
+      conditions = [
+        { attribute: "country", operator: "equals", value: "nl" },
+        {
+          or: [
+            { attribute: "browser_type", operator: "equals", value: "chrome" },
+            {
+              and: [
+                { attribute: "device_type", operator: "equals", value: "mobile" },
+                { attribute: "orientation", operator: "equals", value: "portrait" }
+              ]
+            }
+          ]
+        }
+      ]
+
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          country: "nl",
+          browser_type: "chrome",
+          browser_version: "2.0"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          country: "nl",
+          browser_type: "firefox",
+          device_type: "mobile",
+          orientation: "portrait"
+        })
+      ).to be true
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          browser_type: "firefox",
+          browser_version: "2.0"
+        })
+      ).to be false
+      expect(
+        datafile_reader.all_conditions_are_matched(conditions, {
+          country: "de",
+          browser_type: "firefox",
+          device_type: "desktop"
+        })
+      ).to be false
     end
   end
 
