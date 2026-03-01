@@ -1,4 +1,5 @@
 require "featurevisor"
+require "stringio"
 
 $LOAD_PATH.unshift(File.join(File.dirname(__FILE__), "..", "bin"))
 require "cli"
@@ -77,6 +78,67 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
       )
 
       expect(datafile[:schemaVersion]).to eq("2")
+    end
+  end
+
+  describe "test execution behavior" do
+    it "evaluates expectedEvaluations in child assertions" do
+      command = described_class.new(options)
+      instance = double("child-instance")
+
+      allow(instance).to receive(:is_enabled).and_return(true)
+      allow(instance).to receive(:get_variation).and_return("control")
+      allow(instance).to receive(:get_variable).and_return("v")
+      allow(instance).to receive(:evaluate_flag).and_return({ type: "flag", enabled: false })
+      allow(instance).to receive(:evaluate_variation).and_return({ type: "variation", variation_value: "control" })
+      allow(instance).to receive(:evaluate_variable).and_return({ type: "variable", variable_key: "k", variable_value: "v" })
+
+      assertion = {
+        expectedEvaluations: {
+          flag: {
+            enabled: true
+          }
+        }
+      }
+
+      result = command.send(:run_test_feature_child, assertion, "myFeature", instance, "warn")
+      expect(result[:has_error]).to be true
+      expect(result[:errors]).to include("expectedEvaluations.flag.enabled")
+    end
+
+    it "counts missing-datafile assertion as failed" do
+      command = described_class.new(options)
+
+      allow(command).to receive(:exit).and_raise(SystemExit.new(1))
+
+      tests = [
+        {
+          key: "features/missing.spec",
+          feature: "foo",
+          assertions: [
+            {
+              description: "missing datafile assertion",
+              environment: "production",
+              scope: "browsers"
+            }
+          ]
+        }
+      ]
+
+      output = StringIO.new
+      original_stdout = $stdout
+      $stdout = output
+      begin
+        expect do
+          command.send(:run_tests, tests, {}, {}, "warn", { scopes: [] })
+        end.to raise_error(SystemExit)
+      ensure
+        $stdout = original_stdout
+      end
+
+      expect(output.string).to include("no datafile found for assertion scope/tag/environment combination")
+      expect(output.string).to include("Test specs: 0 passed, 1 failed")
+      expect(output.string).to include("Assertions: 0 passed, 1 failed")
     end
   end
 end

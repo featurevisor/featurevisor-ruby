@@ -41,7 +41,7 @@ This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 proje
 - [Close](#close)
 - [CLI usage](#cli-usage)
   - [Test](#test)
-  - [Test against example-1](#test-against-example-1)
+  - [Test against local monorepo's example-1](#test-against-local-monorepos-example-1)
   - [Benchmark](#benchmark)
   - [Assess distribution](#assess-distribution)
 - [Development](#development)
@@ -694,14 +694,17 @@ $ bundle exec featurevisor test \
 
 `--with-scopes` and `--with-tags` make the Ruby test runner build scoped/tagged datafiles in memory (via `npx featurevisor build --json`) and evaluate matching assertions against those exact datafiles.
 
+If an assertion references `scope` and `--with-scopes` is not provided, the runner still evaluates the assertion by merging that scope's configured context into the assertion context (without building scoped datafiles).
+
 For compatibility, camelCase aliases are also supported: `--withScopes` and `--withTags`.
 
-### Test against example-1
+### Test against local monorepo's example-1
 
 ```bash
 $ cd /absolute/path/to/featurevisor-ruby
-$ bundle exec featurevisor test --projectDirectoryPath=/path/to/featurevisor/project
-$ bundle exec featurevisor test --projectDirectoryPath=/path/to/featurevisor/project --with-scopes
+$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1
+$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-scopes
+$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-tags
 ```
 
 ### Benchmark

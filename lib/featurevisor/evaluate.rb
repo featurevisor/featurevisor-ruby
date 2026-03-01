@@ -386,8 +386,8 @@ module Featurevisor
 
               required_variation_value = nil
 
-              if required_variation_evaluation[:variation_value]
-                required_variation_value = required_variation_evaluation[:variation_value]
+              if has_key?(required_variation_evaluation, :variation_value)
+                required_variation_value = fetch_with_symbol_key(required_variation_evaluation, :variation_value)
               elsif required_variation_evaluation[:variation]
                 required_variation_value = required_variation_evaluation[:variation][:value]
               end

@@ -319,6 +319,92 @@ RSpec.describe Featurevisor::Evaluate do
       expect(result[:required]).to eq(["required-feature"])
     end
 
+    it "should treat required variation value false as a valid match" do
+      feature = {
+        key: "test-feature",
+        required: [{ key: "required-feature", variation: false }]
+      }
+
+      allow(datafile_reader).to receive(:get_feature).and_return(feature)
+      allow(datafile_reader).to receive(:get_matched_force).and_return({
+        force: nil,
+        forceIndex: nil
+      })
+      allow(datafile_reader).to receive(:get_matched_traffic).and_return(nil)
+      allow(Featurevisor::Bucketer).to receive(:get_bucket_key).and_return("test.123")
+      allow(Featurevisor::Bucketer).to receive(:get_bucketed_number).and_return(50)
+
+      allow(Featurevisor::Evaluate).to receive(:evaluate).and_call_original
+      allow(Featurevisor::Evaluate).to receive(:evaluate).with(
+        hash_including(type: "flag", feature_key: "required-feature")
+      ).and_return({
+        type: "flag",
+        feature_key: "required-feature",
+        enabled: true
+      })
+      allow(Featurevisor::Evaluate).to receive(:evaluate).with(
+        hash_including(type: "variation", feature_key: "required-feature")
+      ).and_return({
+        type: "variation",
+        feature_key: "required-feature",
+        variation_value: false
+      })
+
+      result = Featurevisor::Evaluate.evaluate(
+        type: "flag",
+        feature_key: feature,
+        context: {},
+        logger: logger,
+        hooks_manager: hooks_manager,
+        datafile_reader: datafile_reader
+      )
+
+      expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::REQUIRED)
+    end
+
+    it "should treat required variation value 0 as a valid match" do
+      feature = {
+        key: "test-feature",
+        required: [{ key: "required-feature", variation: 0 }]
+      }
+
+      allow(datafile_reader).to receive(:get_feature).and_return(feature)
+      allow(datafile_reader).to receive(:get_matched_force).and_return({
+        force: nil,
+        forceIndex: nil
+      })
+      allow(datafile_reader).to receive(:get_matched_traffic).and_return(nil)
+      allow(Featurevisor::Bucketer).to receive(:get_bucket_key).and_return("test.123")
+      allow(Featurevisor::Bucketer).to receive(:get_bucketed_number).and_return(50)
+
+      allow(Featurevisor::Evaluate).to receive(:evaluate).and_call_original
+      allow(Featurevisor::Evaluate).to receive(:evaluate).with(
+        hash_including(type: "flag", feature_key: "required-feature")
+      ).and_return({
+        type: "flag",
+        feature_key: "required-feature",
+        enabled: true
+      })
+      allow(Featurevisor::Evaluate).to receive(:evaluate).with(
+        hash_including(type: "variation", feature_key: "required-feature")
+      ).and_return({
+        type: "variation",
+        feature_key: "required-feature",
+        variation_value: 0
+      })
+
+      result = Featurevisor::Evaluate.evaluate(
+        type: "flag",
+        feature_key: feature,
+        context: {},
+        logger: logger,
+        hooks_manager: hooks_manager,
+        datafile_reader: datafile_reader
+      )
+
+      expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::REQUIRED)
+    end
+
     it "should handle errors gracefully" do
       options = {
         type: "flag",

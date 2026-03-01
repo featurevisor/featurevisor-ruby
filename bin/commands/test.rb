@@ -300,25 +300,26 @@ module FeaturevisorCLI
                     errors: "      ✘ no datafile found for assertion scope/tag/environment combination\n",
                     duration: 0
                   }
-                  next
                 end
 
-                instance = create_tester_instance(datafile, level, assertion)
-                scope_context = {}
+                if datafile
+                  instance = create_tester_instance(datafile, level, assertion)
+                  scope_context = {}
 
-                if assertion[:scope] && !@options.with_scopes
-                  # If not using scoped datafiles, mimic JS behavior by merging scope context.
-                  scope_context = get_scope_context(config, assertion[:scope])
+                  if assertion[:scope] && !@options.with_scopes
+                    # If not using scoped datafiles, mimic JS behavior by merging scope context.
+                    scope_context = get_scope_context(config, assertion[:scope])
+                  end
+
+                  # Show datafile if requested
+                  if @options.show_datafile
+                    puts ""
+                    puts JSON.pretty_generate(datafile)
+                    puts ""
+                  end
+
+                  test_result = run_test_feature(assertion, test[:feature], instance, level, scope_context)
                 end
-
-                # Show datafile if requested
-                if @options.show_datafile
-                  puts ""
-                  puts JSON.pretty_generate(datafile)
-                  puts ""
-                end
-
-                test_result = run_test_feature(assertion, test[:feature], instance, level, scope_context)
               elsif test[:segment]
                 segment_key = test[:segment]
                 segment = segments_by_key[segment_key]
@@ -608,6 +609,55 @@ module FeaturevisorCLI
           end
         end
 
+        # Test expectedEvaluations
+        if assertion[:expectedEvaluations]
+          expected_evaluations = assertion[:expectedEvaluations]
+
+          if expected_evaluations[:flag]
+            evaluation = evaluate_from_instance(instance, :flag, feature_key, context, override_options)
+            expected_evaluations[:flag].each do |key, expected_value|
+              actual_value = get_evaluation_value(evaluation, key)
+              if !compare_values(actual_value, expected_value)
+                has_error = true
+                errors += "      ✘ expectedEvaluations.flag.#{key}: expected #{expected_value} but received #{actual_value}\n"
+              end
+            end
+          end
+
+          if expected_evaluations[:variation]
+            evaluation = evaluate_from_instance(instance, :variation, feature_key, context, override_options)
+            expected_evaluations[:variation].each do |key, expected_value|
+              actual_value = get_evaluation_value(evaluation, key)
+              if !compare_values(actual_value, expected_value)
+                has_error = true
+                errors += "      ✘ expectedEvaluations.variation.#{key}: expected #{expected_value} but received #{actual_value}\n"
+              end
+            end
+          end
+
+          if expected_evaluations[:variables]
+            expected_evaluations[:variables].each do |variable_key, expected_eval|
+              if expected_eval.is_a?(Hash)
+                evaluation = evaluate_from_instance(
+                  instance,
+                  :variable,
+                  feature_key,
+                  context,
+                  override_options,
+                  variable_key
+                )
+                expected_eval.each do |key, expected_value|
+                  actual_value = get_evaluation_value(evaluation, key)
+                  if !compare_values(actual_value, expected_value)
+                    has_error = true
+                    errors += "      ✘ expectedEvaluations.variables.#{variable_key}.#{key}: expected #{expected_value} but received #{actual_value}\n"
+                  end
+                end
+              end
+            end
+          end
+        end
+
         duration = Time.now - start_time
 
         {
@@ -705,6 +755,40 @@ module FeaturevisorCLI
         end
 
         options
+      end
+
+      def evaluate_from_instance(instance, type, feature_key, context, override_options, variable_key = nil)
+        method_name = :"evaluate_#{type}"
+
+        if instance.respond_to?(method_name)
+          if variable_key.nil?
+            return instance.send(method_name, feature_key, context, override_options)
+          end
+
+          return instance.send(method_name, feature_key, variable_key, context, override_options)
+        end
+
+        if instance.respond_to?(:parent) && instance.respond_to?(:sticky)
+          parent = instance.parent
+          combined_context = if instance.respond_to?(:context)
+            { **(instance.context || {}), **context }
+          else
+            context
+          end
+
+          combined_options = {
+            sticky: instance.sticky,
+            **override_options
+          }
+
+          if variable_key.nil?
+            return parent.send(method_name, feature_key, combined_context, combined_options)
+          end
+
+          return parent.send(method_name, feature_key, variable_key, combined_context, combined_options)
+        end
+
+        {}
       end
 
       def get_evaluation_value(evaluation, key)
