@@ -18,7 +18,8 @@ RSpec.describe Featurevisor::Evaluate do
       expect(Featurevisor::EvaluationReason::VARIABLE_NOT_FOUND).to eq("variable_not_found")
       expect(Featurevisor::EvaluationReason::VARIABLE_DEFAULT).to eq("variable_default")
       expect(Featurevisor::EvaluationReason::VARIABLE_DISABLED).to eq("variable_disabled")
-      expect(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE).to eq("variable_override")
+      expect(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE).to eq("variable_override_rule")
+      expect(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_VARIATION).to eq("variable_override_variation")
     end
 
     it "should have common reasons" do
@@ -336,6 +337,123 @@ RSpec.describe Featurevisor::Evaluate do
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::ERROR)
       expect(result[:error]).to be_a(StandardError)
       expect(result[:error].message).to eq("Test error")
+    end
+
+    it "should return variable override from rule with index" do
+      feature = {
+        key: "test-feature",
+        bucketBy: "userId",
+        variablesSchema: {
+          test_var: {
+            type: "boolean",
+            defaultValue: true
+          }
+        },
+        traffic: [
+          {
+            key: "rule-1",
+            segments: "*",
+            percentage: 100_000,
+            allocation: [],
+            variableOverrides: {
+              test_var: [
+                { conditions: [{ attribute: "country", operator: "equals", value: "de" }], value: false },
+                { conditions: [{ attribute: "country", operator: "equals", value: "nl" }], value: true }
+              ]
+            },
+            variables: {
+              test_var: true
+            }
+          }
+        ],
+        variations: []
+      }
+
+      allow(datafile_reader).to receive(:get_matched_force).and_return({
+        force: nil,
+        forceIndex: nil
+      })
+      allow(datafile_reader).to receive(:get_matched_traffic).and_return(feature[:traffic][0])
+      allow(datafile_reader).to receive(:get_matched_allocation).and_return(nil)
+      allow(datafile_reader).to receive(:all_conditions_are_matched).and_return(false, true)
+      allow(Featurevisor::Bucketer).to receive(:get_bucket_key).and_return("user.test-feature")
+      allow(Featurevisor::Bucketer).to receive(:get_bucketed_number).and_return(1)
+
+      result = Featurevisor::Evaluate.evaluate(
+        type: "variable",
+        feature_key: feature,
+        variable_key: :test_var,
+        context: { country: "nl" },
+        logger: logger,
+        hooks_manager: hooks_manager,
+        datafile_reader: datafile_reader
+      )
+
+      expect(result[:reason]).to eq(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE)
+      expect(result[:variable_value]).to be true
+      expect(result[:variable_override_index]).to eq(1)
+    end
+
+    it "should return variable override from variation with index" do
+      feature = {
+        key: "test-feature",
+        bucketBy: "userId",
+        variablesSchema: {
+          test_var: {
+            type: "boolean",
+            defaultValue: true
+          }
+        },
+        traffic: [
+          {
+            key: "rule-1",
+            segments: "*",
+            percentage: 100_000,
+            variation: "treatment",
+            allocation: [
+              { variation: "treatment", range: [0, 100_000] }
+            ]
+          }
+        ],
+        variations: [
+          {
+            value: "treatment",
+            variableOverrides: {
+              test_var: [
+                { conditions: [{ attribute: "country", operator: "equals", value: "de" }], value: true },
+                { conditions: [{ attribute: "country", operator: "equals", value: "nl" }], value: false }
+              ]
+            },
+            variables: {
+              test_var: true
+            }
+          }
+        ]
+      }
+
+      allow(datafile_reader).to receive(:get_matched_force).and_return({
+        force: nil,
+        forceIndex: nil
+      })
+      allow(datafile_reader).to receive(:get_matched_traffic).and_return(feature[:traffic][0])
+      allow(datafile_reader).to receive(:get_matched_allocation).and_return(feature[:traffic][0][:allocation][0])
+      allow(datafile_reader).to receive(:all_conditions_are_matched).and_return(false, true)
+      allow(Featurevisor::Bucketer).to receive(:get_bucket_key).and_return("user.test-feature")
+      allow(Featurevisor::Bucketer).to receive(:get_bucketed_number).and_return(1)
+
+      result = Featurevisor::Evaluate.evaluate(
+        type: "variable",
+        feature_key: feature,
+        variable_key: :test_var,
+        context: { country: "nl" },
+        logger: logger,
+        hooks_manager: hooks_manager,
+        datafile_reader: datafile_reader
+      )
+
+      expect(result[:reason]).to eq(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_VARIATION)
+      expect(result[:variable_value]).to be false
+      expect(result[:variable_override_index]).to eq(1)
     end
   end
 end

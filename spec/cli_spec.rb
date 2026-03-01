@@ -40,10 +40,18 @@ end
 RSpec.describe FeaturevisorCLI::Parser do
   describe ".parse" do
     it "parses basic options" do
-      options = FeaturevisorCLI::Parser.parse(["test", "--verbose", "--n=5000"])
+      options = FeaturevisorCLI::Parser.parse(["test", "--verbose", "--n=5000", "--with-scopes", "--with-tags"])
       expect(options.command).to eq("test")
       expect(options.verbose).to be true
       expect(options.n).to eq(5000)
+      expect(options.with_scopes).to be true
+      expect(options.with_tags).to be true
+    end
+
+    it "parses camelCase aliases for scope/tag flags" do
+      options = FeaturevisorCLI::Parser.parse(["test", "--withScopes", "--withTags"])
+      expect(options.with_scopes).to be true
+      expect(options.with_tags).to be true
     end
 
     it "sets default values" do

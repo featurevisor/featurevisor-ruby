@@ -1,6 +1,7 @@
 require "json"
 require "find"
 require "open3"
+require "shellwords"
 
 module FeaturevisorCLI
   module Commands
@@ -19,7 +20,7 @@ module FeaturevisorCLI
 
         # Get project configuration
         config = get_config
-        environments = config[:environments] || []
+        environments = get_environments(config)
         segments_by_key = get_segments
 
         # Use CLI schemaVersion option or fallback to config
@@ -28,8 +29,8 @@ module FeaturevisorCLI
           schema_version = config[:schemaVersion]
         end
 
-        # Build datafiles for all environments
-        datafiles_by_environment = build_datafiles(environments, schema_version, @options.inflate)
+        # Build datafiles for all environments (+ scoped/tagged variants)
+        datafiles_by_key = build_datafiles(config, environments, schema_version, @options.inflate)
 
         puts ""
 
@@ -42,18 +43,15 @@ module FeaturevisorCLI
           return
         end
 
-        # Create SDK instances for each environment
-        sdk_instances_by_environment = create_sdk_instances(environments, datafiles_by_environment, level)
-
         # Run tests
-        run_tests(tests, sdk_instances_by_environment, datafiles_by_environment, segments_by_key, level)
+        run_tests(tests, datafiles_by_key, segments_by_key, level, config)
       end
 
       private
 
       def get_config
         puts "Getting config..."
-        command = "(cd #{@project_path} && npx featurevisor config --json)"
+        command = "(cd #{Shellwords.escape(@project_path)} && npx featurevisor config --json)"
         config_output = execute_command(command)
 
         begin
@@ -67,7 +65,7 @@ module FeaturevisorCLI
 
       def get_segments
         puts "Getting segments..."
-        command = "(cd #{@project_path} && npx featurevisor list --segments --json)"
+        command = "(cd #{Shellwords.escape(@project_path)} && npx featurevisor list --segments --json)"
         segments_output = execute_command(command)
 
         begin
@@ -86,40 +84,111 @@ module FeaturevisorCLI
         end
       end
 
-      def build_datafiles(environments, schema_version, inflate)
-        datafiles_by_environment = {}
+      def get_environments(config)
+        environments = config[:environments]
+
+        return [false] if environments == false
+        return environments if environments.is_a?(Array) && !environments.empty?
+
+        [false]
+      end
+
+      def base_datafile_key(environment)
+        environment == false ? false : environment
+      end
+
+      def scoped_datafile_key(environment, scope_name)
+        if environment == false
+          "scope-#{scope_name}"
+        else
+          "#{environment}-scope-#{scope_name}"
+        end
+      end
+
+      def tagged_datafile_key(environment, tag)
+        if environment == false
+          "tag-#{tag}"
+        else
+          "#{environment}-tag-#{tag}"
+        end
+      end
+
+      def build_datafiles(config, environments, schema_version, inflate)
+        datafiles_by_key = {}
 
         environments.each do |environment|
-          puts "Building datafile for environment: #{environment}..."
+          environment_label = environment == false ? "default (no environment)" : environment
+          puts "Building datafile for environment: #{environment_label}..."
 
-          command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
+          datafiles_by_key[base_datafile_key(environment)] = build_single_datafile(
+            environment: environment,
+            schema_version: schema_version,
+            inflate: inflate
+          )
 
-          if schema_version && !schema_version.empty?
-            command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--schemaVersion=#{schema_version}", "--json"]
-          end
+          if @options.with_scopes && config[:scopes].is_a?(Array)
+            config[:scopes].each do |scope|
+              next unless scope[:name]
 
-          if inflate && inflate > 0
-            if schema_version && !schema_version.empty?
-              command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--schemaVersion=#{schema_version}", "--inflate=#{inflate}", "--json"]
-            else
-              command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--inflate=#{inflate}", "--json"]
+              puts "Building scoped datafile for scope: #{scope[:name]}..."
+              datafiles_by_key[scoped_datafile_key(environment, scope[:name])] = build_single_datafile(
+                environment: environment,
+                schema_version: schema_version,
+                inflate: inflate,
+                scope: scope[:name]
+              )
             end
           end
 
-          command = command_parts.join(" ")
-          datafile_output = execute_command(command)
-
-          begin
-            datafile = JSON.parse(datafile_output, symbolize_names: true)
-            datafiles_by_environment[environment] = datafile
-          rescue JSON::ParserError => e
-            puts "Error: Failed to parse datafile JSON for #{environment}: #{e.message}"
-            puts "Command output: #{datafile_output}"
-            exit 1
+          if @options.with_tags && config[:tags].is_a?(Array)
+            config[:tags].each do |tag|
+              puts "Building tagged datafile for tag: #{tag}..."
+              datafiles_by_key[tagged_datafile_key(environment, tag)] = build_single_datafile(
+                environment: environment,
+                schema_version: schema_version,
+                inflate: inflate,
+                tag: tag
+              )
+            end
           end
         end
 
-        datafiles_by_environment
+        datafiles_by_key
+      end
+
+      def build_single_datafile(environment:, schema_version:, inflate:, scope: nil, tag: nil)
+        command_parts = ["npx", "featurevisor", "build", "--json"]
+
+        if environment != false && !environment.nil?
+          command_parts << "--environment=#{Shellwords.escape(environment.to_s)}"
+        end
+
+        if schema_version && !schema_version.empty?
+          command_parts << "--schemaVersion=#{Shellwords.escape(schema_version.to_s)}"
+        end
+
+        if inflate && inflate > 0
+          command_parts << "--inflate=#{inflate}"
+        end
+
+        if scope
+          command_parts << "--scope=#{Shellwords.escape(scope.to_s)}"
+        end
+
+        if tag
+          command_parts << "--tag=#{Shellwords.escape(tag.to_s)}"
+        end
+
+        command = "(cd #{Shellwords.escape(@project_path)} && #{command_parts.join(' ')})"
+        datafile_output = execute_command(command)
+
+        begin
+          JSON.parse(datafile_output, symbolize_names: true)
+        rescue JSON::ParserError => e
+          puts "Error: Failed to parse datafile JSON: #{e.message}"
+          puts "Command output: #{datafile_output}"
+          exit 1
+        end
       end
 
       def get_logger_level
@@ -133,17 +202,17 @@ module FeaturevisorCLI
       end
 
       def get_tests
-        command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "list", "--tests", "--applyMatrix", "--json"]
+        command_parts = ["npx", "featurevisor", "list", "--tests", "--applyMatrix", "--json"]
 
         if @options.key_pattern && !@options.key_pattern.empty?
-          command_parts << "--keyPattern=#{@options.key_pattern}"
+          command_parts << "--keyPattern=#{Shellwords.escape(@options.key_pattern)}"
         end
 
         if @options.assertion_pattern && !@options.assertion_pattern.empty?
-          command_parts << "--assertionPattern=#{@options.assertion_pattern}"
+          command_parts << "--assertionPattern=#{Shellwords.escape(@options.assertion_pattern)}"
         end
 
-        command = command_parts.join(" ")
+        command = "(cd #{Shellwords.escape(@project_path)} && #{command_parts.join(' ')})"
         tests_output = execute_command(command)
 
         begin
@@ -155,31 +224,58 @@ module FeaturevisorCLI
         end
       end
 
-      def create_sdk_instances(environments, datafiles_by_environment, level)
-        sdk_instances_by_environment = {}
+      def get_scope_context(config, scope_name)
+        return {} unless scope_name && config[:scopes].is_a?(Array)
 
-        environments.each do |environment|
-          datafile = datafiles_by_environment[environment]
+        scope = config[:scopes].find { |s| s[:name] == scope_name }
+        return {} unless scope && scope[:context].is_a?(Hash)
 
-          # Create SDK instance
-          instance = Featurevisor.create_instance(
-            datafile: datafile,
-            log_level: level,
-            hooks: [
-              {
-                name: "tester-hook",
-                bucket_value: ->(options) { options.bucket_value }
-              }
-            ]
-          )
-
-          sdk_instances_by_environment[environment] = instance
-        end
-
-        sdk_instances_by_environment
+        parse_context(scope[:context])
       end
 
-      def run_tests(tests, sdk_instances_by_environment, datafiles_by_environment, segments_by_key, level)
+      def resolve_datafile_for_assertion(assertion, datafiles_by_key)
+        environment = assertion.key?(:environment) ? assertion[:environment] : false
+        environment = false if environment.nil?
+
+        scoped_key = assertion[:scope] ? scoped_datafile_key(environment, assertion[:scope]) : nil
+        tagged_key = assertion[:tag] ? tagged_datafile_key(environment, assertion[:tag]) : nil
+        base_key = base_datafile_key(environment)
+
+        if scoped_key && datafiles_by_key.key?(scoped_key)
+          return datafiles_by_key[scoped_key]
+        end
+
+        if tagged_key && datafiles_by_key.key?(tagged_key)
+          return datafiles_by_key[tagged_key]
+        end
+
+        datafiles_by_key[base_key]
+      end
+
+      def create_tester_instance(datafile, level, assertion)
+        sticky = parse_sticky(assertion[:sticky])
+
+        Featurevisor.create_instance(
+          datafile: datafile,
+          sticky: sticky,
+          log_level: level,
+          hooks: [
+            {
+              name: "tester-hook",
+              bucket_value: ->(options) do
+                at = assertion[:at]
+                if at.is_a?(Numeric)
+                  (at * 1000).to_i
+                else
+                  options.bucket_value
+                end
+              end
+            }
+          ]
+        )
+      end
+
+      def run_tests(tests, datafiles_by_key, segments_by_key, level, config)
         passed_tests_count = 0
         failed_tests_count = 0
         passed_assertions_count = 0
@@ -197,43 +293,32 @@ module FeaturevisorCLI
               test_result = nil
 
               if test[:feature]
-                environment = assertion[:environment]
-                instance = sdk_instances_by_environment[environment]
+                datafile = resolve_datafile_for_assertion(assertion, datafiles_by_key)
+                if datafile.nil?
+                  test_result = {
+                    has_error: true,
+                    errors: "      ✘ no datafile found for assertion scope/tag/environment combination\n",
+                    duration: 0
+                  }
+                  next
+                end
+
+                instance = create_tester_instance(datafile, level, assertion)
+                scope_context = {}
+
+                if assertion[:scope] && !@options.with_scopes
+                  # If not using scoped datafiles, mimic JS behavior by merging scope context.
+                  scope_context = get_scope_context(config, assertion[:scope])
+                end
 
                 # Show datafile if requested
                 if @options.show_datafile
-                  datafile = datafiles_by_environment[environment]
                   puts ""
                   puts JSON.pretty_generate(datafile)
                   puts ""
                 end
 
-                # If "at" parameter is provided, create a new instance with the specific hook
-                if assertion[:at]
-                  datafile = datafiles_by_environment[environment]
-
-                  instance = Featurevisor.create_instance(
-                    datafile: datafile,
-                    log_level: level,
-                    hooks: [
-                      {
-                        name: "tester-hook",
-                        bucket_value: ->(options) do
-                          # Match JavaScript implementation: assertion.at * (MAX_BUCKETED_NUMBER / 100)
-                          # MAX_BUCKETED_NUMBER is 100000, so this becomes assertion.at * 1000
-                          at = assertion[:at]
-                          if at.is_a?(Numeric)
-                            (at * 1000).to_i
-                          else
-                            options.bucket_value
-                          end
-                        end
-                      }
-                    ]
-                  )
-                end
-
-                test_result = run_test_feature(assertion, test[:feature], instance, level)
+                test_result = run_test_feature(assertion, test[:feature], instance, level, scope_context)
               elsif test[:segment]
                 segment_key = test[:segment]
                 segment = segments_by_key[segment_key]
@@ -280,8 +365,9 @@ module FeaturevisorCLI
         end
       end
 
-      def run_test_feature(assertion, feature_key, instance, level)
+      def run_test_feature(assertion, feature_key, instance, level, scope_context = {})
         context = parse_context(assertion[:context])
+        context = { **scope_context, **context } if scope_context && !scope_context.empty?
         sticky = parse_sticky(assertion[:sticky])
 
         # Set context and sticky for this assertion
@@ -325,7 +411,7 @@ module FeaturevisorCLI
           expected_variables = assertion[:expectedVariables]
           expected_variables.each do |variable_key, expected_value|
             # Set default variable value for this specific variable
-            if assertion[:defaultVariableValues] && assertion[:defaultVariableValues][variable_key]
+            if assertion[:defaultVariableValues].is_a?(Hash) && assertion[:defaultVariableValues].key?(variable_key)
               override_options[:default_variable_value] = assertion[:defaultVariableValues][variable_key]
             end
 
@@ -483,7 +569,7 @@ module FeaturevisorCLI
           expected_variables = assertion[:expectedVariables]
           expected_variables.each do |variable_key, expected_value|
             # Set default variable value for this specific variable
-            if assertion[:defaultVariableValues] && assertion[:defaultVariableValues][variable_key]
+            if assertion[:defaultVariableValues].is_a?(Hash) && assertion[:defaultVariableValues].key?(variable_key)
               override_options[:default_variable_value] = assertion[:defaultVariableValues][variable_key]
             end
 
@@ -614,7 +700,7 @@ module FeaturevisorCLI
       def create_override_options(assertion)
         options = {}
 
-        if assertion[:defaultVariationValue]
+        if assertion.key?(:defaultVariationValue)
           options[:default_variation_value] = assertion[:defaultVariationValue]
         end
 
@@ -659,6 +745,8 @@ module FeaturevisorCLI
           evaluation[:variable_value]
         when :variableSchema
           evaluation[:variable_schema]
+        when :variableOverrideIndex
+          evaluation[:variable_override_index]
         else
           nil
         end
