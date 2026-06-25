@@ -12,52 +12,37 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
   end
 
   describe "datafile routing helpers" do
-    it "prefers scoped datafile over tagged and base datafile" do
+    it "prefers target datafile over base datafile" do
       command = described_class.new(options)
 
       datafiles_by_key = {
         "production" => { schemaVersion: "2" },
-        "production-tag-web" => { schemaVersion: "2", tagged: true },
-        "production-scope-browsers" => { schemaVersion: "2", scoped: true }
+        "production-target-checkout" => { schemaVersion: "2", target: "checkout" }
       }
 
       assertion = {
         environment: "production",
-        scope: "browsers",
-        tag: "web"
+        target: "checkout"
       }
 
       datafile = command.send(:resolve_datafile_for_assertion, assertion, datafiles_by_key)
-      expect(datafile[:scoped]).to be true
-    end
-
-    it "returns parsed scope context by name" do
-      command = described_class.new(options)
-      config = {
-        scopes: [
-          { name: "browsers", context: { "platform" => "web" } }
-        ]
-      }
-
-      scope_context = command.send(:get_scope_context, config, "browsers")
-      expect(scope_context).to eq({ platform: "web" })
+      expect(datafile[:target]).to eq("checkout")
     end
   end
 
   describe "build command generation" do
-    it "includes scope and environment flags when building scoped datafiles" do
+    it "includes target and environment flags when building target datafiles" do
       command = described_class.new(options)
 
       expect(command).to receive(:execute_command)
-        .with(include("featurevisor build", "--environment=production", "--scope=browsers", "--json"))
+        .with(include("featurevisor build", "--environment=production", "--target=checkout", "--json"))
         .and_return('{"schemaVersion":"2","revision":"1","segments":{},"features":{}}')
 
       datafile = command.send(
         :build_single_datafile,
         environment: "production",
-        schema_version: "2",
         inflate: nil,
-        scope: "browsers"
+        target: "checkout"
       )
 
       expect(datafile[:schemaVersion]).to eq("2")
@@ -73,7 +58,6 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
       datafile = command.send(
         :build_single_datafile,
         environment: false,
-        schema_version: nil,
         inflate: nil
       )
 
@@ -119,7 +103,7 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
             {
               description: "missing datafile assertion",
               environment: "production",
-              scope: "browsers"
+              target: "checkout"
             }
           ]
         }
@@ -130,13 +114,13 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
       $stdout = output
       begin
         expect do
-          command.send(:run_tests, tests, {}, {}, "warn", { scopes: [] })
+          command.send(:run_tests, tests, {}, {}, "warn", {})
         end.to raise_error(SystemExit)
       ensure
         $stdout = original_stdout
       end
 
-      expect(output.string).to include("no datafile found for assertion scope/tag/environment combination")
+      expect(output.string).to include("no datafile found for assertion target/environment combination")
       expect(output.string).to include("Test specs: 0 passed, 1 failed")
       expect(output.string).to include("Assertions: 0 passed, 1 failed")
     end

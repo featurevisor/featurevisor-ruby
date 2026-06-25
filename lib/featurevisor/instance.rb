@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 require "json"
+require "securerandom"
 
 module Featurevisor
   # Instance class for managing feature flag evaluations
   class Instance
-    attr_reader :context, :logger, :sticky, :datafile_reader, :hooks_manager, :emitter
+    attr_reader :context, :logger, :sticky, :datafile_reader, :modules_manager, :emitter
 
     # Empty datafile template
     EMPTY_DATAFILE = {
@@ -22,17 +23,17 @@ module Featurevisor
     # @option options [String] :log_level Log level
     # @option options [Logger] :logger Logger instance
     # @option options [Hash] :sticky Sticky features
-    # @option options [Array<Hook>] :hooks Array of hooks
+    # @option options [Array<Hash, FeaturevisorModule>] :modules Array of modules
+    # @option options [Proc] :on_diagnostic Diagnostic handler
     def initialize(options = {})
       # from options
       @context = options[:context] || {}
       @logger = options[:logger] || Featurevisor.create_logger(level: options[:log_level] || "info")
-      @hooks_manager = Featurevisor::Hooks::HooksManager.new(
-        hooks: (options[:hooks] || []).map { |hook_data| Featurevisor::Hooks::Hook.new(hook_data) },
-        logger: @logger
-      )
+      @on_diagnostic = options[:on_diagnostic] || options[:onDiagnostic]
       @emitter = Featurevisor::Emitter.new
       @sticky = options[:sticky] || {}
+      @closed = false
+      @module_diagnostic_subscriptions = []
 
       # datafile
       @datafile_reader = Featurevisor::DatafileReader.new(
@@ -40,14 +41,22 @@ module Featurevisor
         logger: @logger
       )
 
+      @modules_manager = Featurevisor::Modules::ModulesManager.new(
+        modules: options[:modules] || [],
+        report_diagnostic: method(:report_diagnostic),
+        module_api_factory: method(:create_module_api),
+        clear_module_diagnostic_subscriptions: method(:clear_module_diagnostic_subscriptions)
+      )
+
       if options[:datafile]
-        @datafile_reader = Featurevisor::DatafileReader.new(
-          datafile: options[:datafile].is_a?(String) ? JSON.parse(options[:datafile], symbolize_names: true) : options[:datafile],
-          logger: @logger
-        )
+        set_datafile(options[:datafile], true)
       end
 
-      @logger.info("Featurevisor SDK initialized")
+      report_diagnostic(
+        level: "info",
+        code: "sdk_initialized",
+        message: "Featurevisor SDK initialized"
+      )
     end
 
     # Set the log level
@@ -58,20 +67,36 @@ module Featurevisor
 
     # Set the datafile
     # @param datafile [Hash, String] Datafile content or JSON string
-    def set_datafile(datafile)
+    # @param replace [Boolean] Whether to replace instead of merge
+    def set_datafile(datafile, replace = false)
+      return if @closed
+
       begin
+        parsed_datafile = datafile.is_a?(String) ? JSON.parse(datafile, symbolize_names: true) : datafile
+        next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile_reader.get_datafile, parsed_datafile)
         new_datafile_reader = Featurevisor::DatafileReader.new(
-          datafile: datafile.is_a?(String) ? JSON.parse(datafile, symbolize_names: true) : datafile,
+          datafile: next_datafile,
           logger: @logger
         )
 
-        details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile_reader, new_datafile_reader)
+        details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile_reader, new_datafile_reader, replace)
         @datafile_reader = new_datafile_reader
 
         @logger.info("datafile set", details)
         @emitter.trigger("datafile_set", details)
+        report_diagnostic(
+          level: "info",
+          code: "datafile_set",
+          message: "datafile set",
+          details: details
+        )
       rescue => e
-        @logger.error("could not parse datafile", { error: e })
+        report_diagnostic(
+          level: "error",
+          code: "invalid_datafile",
+          message: "could not parse datafile",
+          original_error: e
+        )
       end
     end
 
@@ -109,11 +134,15 @@ module Featurevisor
       @datafile_reader.get_feature(feature_key)
     end
 
-    # Add a hook
-    # @param hook [Hook] Hook to add
-    # @return [Proc, nil] Remove function or nil if hook already exists
-    def add_hook(hook)
-      @hooks_manager.add(hook)
+    # Add a module
+    # @param mod [Hash, FeaturevisorModule] Module to add
+    # @return [Proc, nil] Remove function or nil if module already exists
+    def add_module(mod)
+      @modules_manager.add(mod)
+    end
+
+    def remove_module(name_or_module)
+      @modules_manager.remove(name_or_module)
     end
 
     # Subscribe to an event
@@ -126,6 +155,9 @@ module Featurevisor
 
     # Close the instance
     def close
+      @closed = true
+      @modules_manager.close_all
+      @module_diagnostic_subscriptions = []
       @emitter.clear_all
     end
 
@@ -182,7 +214,7 @@ module Featurevisor
     # @param options [Hash] Override options
     # @return [Hash] Evaluation result
     def evaluate_flag(feature_key, context = {}, options = {})
-      Featurevisor::Evaluate.evaluate_with_hooks(
+      Featurevisor::Evaluate.evaluate_with_modules(
         get_evaluation_dependencies(context, options).merge(
           type: "flag",
           feature_key: feature_key
@@ -211,7 +243,7 @@ module Featurevisor
     # @param options [Hash] Override options
     # @return [Hash] Evaluation result
     def evaluate_variation(feature_key, context = {}, options = {})
-      Featurevisor::Evaluate.evaluate_with_hooks(
+      Featurevisor::Evaluate.evaluate_with_modules(
         get_evaluation_dependencies(context, options).merge(
           type: "variation",
           feature_key: feature_key
@@ -248,7 +280,7 @@ module Featurevisor
     # @param options [Hash] Override options
     # @return [Hash] Evaluation result
     def evaluate_variable(feature_key, variable_key, context = {}, options = {})
-      Featurevisor::Evaluate.evaluate_with_hooks(
+      Featurevisor::Evaluate.evaluate_with_modules(
         get_evaluation_dependencies(context, options).merge(
           type: "variable",
           feature_key: feature_key,
@@ -417,7 +449,7 @@ module Featurevisor
       {
         context: get_context(context),
         logger: @logger,
-        hooks_manager: @hooks_manager,
+        modules_manager: @modules_manager,
         datafile_reader: @datafile_reader,
         sticky: options[:sticky] ? { **(@sticky || {}), **options[:sticky] } : @sticky,
         default_variation_value: options[:default_variation_value],
@@ -451,6 +483,80 @@ module Featurevisor
       end
     rescue
       nil
+    end
+
+    def merge_datafiles(previous, incoming)
+      previous ||= EMPTY_DATAFILE
+      incoming ||= EMPTY_DATAFILE
+
+      {
+        schemaVersion: incoming[:schemaVersion],
+        revision: incoming[:revision],
+        featurevisorVersion: incoming[:featurevisorVersion],
+        segments: {
+          **(previous[:segments] || {}),
+          **(incoming[:segments] || {})
+        },
+        features: {
+          **(previous[:features] || {}),
+          **(incoming[:features] || {})
+        }
+      }.compact
+    end
+
+    def create_module_api(mod)
+      instance = self
+      {
+        get_revision: -> { instance.get_revision },
+        on_diagnostic: lambda do |handler, options = {}|
+          subscription = {
+            id: SecureRandom.uuid,
+            module_id: mod.id,
+            handler: handler,
+            level: options[:level] || options[:log_level] || "info"
+          }
+          @module_diagnostic_subscriptions << subscription
+          -> { @module_diagnostic_subscriptions.reject! { |item| item[:id] == subscription[:id] } }
+        end,
+        report_diagnostic: ->(diagnostic) { report_diagnostic(diagnostic, mod) }
+      }
+    end
+
+    def clear_module_diagnostic_subscriptions(mod)
+      @module_diagnostic_subscriptions.reject! { |item| item[:module_id] == mod.id }
+    end
+
+    def report_diagnostic(diagnostic, source_module = nil)
+      diagnostic = (diagnostic || {}).dup
+      diagnostic[:level] ||= "info"
+      diagnostic[:module] ||= source_module.name if source_module && source_module.name
+
+      @module_diagnostic_subscriptions.dup.each do |subscription|
+        next if source_module && subscription[:module_id] == source_module.id
+        next unless should_report_diagnostic?(diagnostic[:level], subscription[:level])
+
+        subscription[:handler].call(diagnostic)
+      end
+
+      if @on_diagnostic
+        @on_diagnostic.call(diagnostic) if should_report_diagnostic?(diagnostic[:level], @logger.level)
+      else
+        @logger.log(diagnostic[:level], diagnostic[:message], diagnostic.reject { |key, _| key == :message || key == :level })
+      end
+
+      if %w[error fatal].include?(diagnostic[:level])
+        @emitter.trigger("error", diagnostic)
+      end
+    end
+
+    def should_report_diagnostic?(diagnostic_level, subscriber_level)
+      levels = Featurevisor::LOG_LEVELS
+      diagnostic_index = levels.index(diagnostic_level || "info")
+      subscriber_index = levels.index(subscriber_level || "info")
+
+      return false if diagnostic_index.nil? || subscriber_index.nil?
+
+      subscriber_index >= diagnostic_index
     end
   end
 

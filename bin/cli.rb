@@ -82,15 +82,15 @@ module FeaturevisorCLI
           options.show_datafile = true
         end
 
-        opts.on("--schemaVersion=VERSION", "Schema version") do |v|
+        opts.on("--schemaVersion=VERSION", "--schema-version=VERSION", "Legacy schema version option accepted and ignored") do |v|
           options.schema_version = v
         end
 
-        opts.on("--with-scopes", "--withScopes", "Test scoped assertions against scoped datafiles") do
+        opts.on("--with-scopes", "--withScopes", "Legacy scope option accepted and ignored") do
           options.with_scopes = true
         end
 
-        opts.on("--with-tags", "--withTags", "Test tagged assertions against tagged datafiles") do
+        opts.on("--with-tags", "--withTags", "Legacy tag option accepted and ignored") do
           options.with_tags = true
         end
 

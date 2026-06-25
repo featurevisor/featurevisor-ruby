@@ -45,7 +45,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_key: ->(options) {
@@ -93,7 +93,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_key: ->(options) {
@@ -141,7 +141,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_key: ->(options) {
@@ -175,7 +175,7 @@ RSpec.describe "sdk: instance" do
     expect(captured_bucket_key).to eq("456.test")
   end
 
-  it "should intercept context: before hook" do
+  it "should intercept context: before module" do
     intercepted = false
     intercepted_feature_key = ""
     intercepted_variable_key = ""
@@ -204,7 +204,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           before: ->(options) {
@@ -231,7 +231,7 @@ RSpec.describe "sdk: instance" do
     expect(intercepted_variable_key).to be_nil
   end
 
-  it "should intercept value: after hook" do
+  it "should intercept value: after module" do
     intercepted = false
     intercepted_feature_key = ""
     intercepted_variable_key = ""
@@ -260,7 +260,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           after: ->(evaluation, options) {
@@ -642,7 +642,7 @@ RSpec.describe "sdk: instance" do
     bucket_value = 10_000
 
     sdk = Featurevisor.create_instance(
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_value: ->(options) {
@@ -1297,6 +1297,167 @@ RSpec.describe "sdk: instance" do
     expect(sdk.get_feature("manualTest")).to be_a(Hash)
     expect(sdk.get_feature("manualTest")[:key]).to eq("manualTest")
     expect(sdk.is_enabled("manualTest", { userId: "123" })).to be true
+  end
+
+  it "should merge datafiles by default and preserve featurevisorVersion" do
+    sdk = Featurevisor.create_instance(
+      datafile: {
+        schemaVersion: "2",
+        revision: "1.0",
+        featurevisorVersion: "3.0.0",
+        segments: {},
+        features: {
+          firstFeature: {
+            key: "firstFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      }
+    )
+
+    sdk.set_datafile(
+      {
+        schemaVersion: "2",
+        revision: "2.0",
+        featurevisorVersion: "3.1.0",
+        segments: {},
+        features: {
+          secondFeature: {
+            key: "secondFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      }
+    )
+
+    expect(sdk.get_revision).to eq("2.0")
+    expect(sdk.datafile_reader.featurevisor_version).to eq("3.1.0")
+    expect(sdk.get_feature("firstFeature")).to be_a(Hash)
+    expect(sdk.get_feature("secondFeature")).to be_a(Hash)
+  end
+
+  it "should replace datafile when replace is true" do
+    sdk = Featurevisor.create_instance(
+      datafile: {
+        schemaVersion: "2",
+        revision: "1.0",
+        segments: {},
+        features: {
+          firstFeature: {
+            key: "firstFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      }
+    )
+
+    sdk.set_datafile(
+      {
+        schemaVersion: "2",
+        revision: "2.0",
+        segments: {},
+        features: {
+          secondFeature: {
+            key: "secondFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      },
+      true
+    )
+
+    expect(sdk.get_feature("firstFeature")).to be_nil
+    expect(sdk.get_feature("secondFeature")).to be_a(Hash)
+  end
+
+  it "should include replaced flag in datafile_set events" do
+    events = []
+    sdk = Featurevisor.create_instance
+    sdk.on("datafile_set", ->(event) { events << event })
+
+    sdk.set_datafile({ schemaVersion: "2", revision: "1.0", segments: {}, features: {} })
+    sdk.set_datafile({ schemaVersion: "2", revision: "2.0", segments: {}, features: {} }, true)
+
+    expect(events.map { |event| event[:replaced] }).to eq([false, true])
+  end
+
+  it "should run module setup and close lifecycle callbacks" do
+    setup_revision = nil
+    closed = false
+
+    sdk = Featurevisor.create_instance(
+      modules: [
+        {
+          name: "lifecycle",
+          setup: ->(api) { setup_revision = api[:get_revision].call },
+          close: -> { closed = true }
+        }
+      ]
+    )
+
+    expect(setup_revision).to eq("unknown")
+
+    sdk.close
+
+    expect(closed).to be true
+  end
+
+  it "should report duplicate module diagnostics and emit error events" do
+    diagnostics = []
+    errors = []
+    sdk = Featurevisor.create_instance(
+      logger: Featurevisor.create_logger(level: "error"),
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic },
+      modules: [{ name: "duplicate" }]
+    )
+    sdk.on("error", ->(event) { errors << event })
+
+    result = sdk.add_module(name: "duplicate")
+
+    expect(result).to be_nil
+    expect(diagnostics.last).to include(
+      level: "error",
+      code: "duplicate_module",
+      module_name: "duplicate"
+    )
+    expect(errors.last).to include(code: "duplicate_module")
+  end
+
+  it "should support module diagnostic subscribe and report behavior" do
+    module_api = nil
+    received_by_instance = []
+    received_by_module = []
+
+    sdk = Featurevisor.create_instance(
+      on_diagnostic: ->(diagnostic) { received_by_instance << diagnostic },
+      modules: [
+        {
+          name: "listener",
+          setup: ->(api) {
+            api[:on_diagnostic].call(->(diagnostic) { received_by_module << diagnostic })
+          }
+        },
+        {
+          name: "reporter",
+          setup: ->(api) { module_api = api }
+        }
+      ]
+    )
+
+    module_api[:report_diagnostic].call(level: "warn", code: "module_warning", message: "module warning")
+
+    expect(received_by_instance.last).to include(code: "module_warning", module: "reporter")
+    expect(received_by_module.last).to include(code: "module_warning", module: "reporter")
+
+    sdk.remove_module("listener")
+    module_api[:report_diagnostic].call(level: "warn", code: "after_remove", message: "after remove")
+
+    expect(received_by_instance.last).to include(code: "after_remove", module: "reporter")
+    expect(received_by_module.last).to include(code: "module_warning", module: "reporter")
   end
 
   describe "get_value_by_type" do

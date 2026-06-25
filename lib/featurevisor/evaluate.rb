@@ -36,20 +36,17 @@ module Featurevisor
   # Evaluation module for feature flag evaluation
   module Evaluate
 
-    # Evaluate with hooks
+    # Evaluate with modules
     # @param options [Hash] Evaluation options
     # @return [Hash] Evaluation result
-    def self.evaluate_with_hooks(options)
+    def self.evaluate_with_modules(options)
       begin
-        hooks_manager = options[:hooks_manager]
-        hooks = hooks_manager.get_all
+        modules_manager = options[:modules_manager]
 
-        # Run before hooks
+        # Run before modules
         result_options = options
-        hooks.each do |hook|
-          if hook.respond_to?(:call_before)
-            result_options = hook.call_before(result_options)
-          end
+        if modules_manager
+          result_options = modules_manager.run_before_modules(result_options)
         end
 
         # Evaluate
@@ -69,11 +66,9 @@ module Featurevisor
           evaluation[:variable_value] = options[:default_variable_value]
         end
 
-        # Run after hooks
-        hooks.each do |hook|
-          if hook.respond_to?(:call_after)
-            evaluation = hook.call_after(evaluation, result_options)
-          end
+        # Run after modules
+        if modules_manager
+          evaluation = modules_manager.run_after_modules(evaluation, result_options)
         end
 
         evaluation
@@ -108,9 +103,7 @@ module Featurevisor
       logger = options[:logger]
       datafile_reader = options[:datafile_reader]
       sticky = options[:sticky]
-      hooks_manager = options[:hooks_manager]
-
-      hooks = hooks_manager.get_all
+      modules_manager = options[:modules_manager]
       evaluation = nil
 
       begin
@@ -422,24 +415,24 @@ module Featurevisor
           logger: logger
         })
 
-        # Run bucket key hooks
-        bucket_key = hooks_manager.run_bucket_key_hooks({
+        # Run bucket key modules
+        bucket_key = modules_manager.run_bucket_key_modules({
           feature_key: feature_key,
           context: context,
           bucket_by: feature[:bucketBy],
           bucket_key: bucket_key
-        })
+        }) if modules_manager
 
         # bucketValue
         bucket_value = Featurevisor::Bucketer.get_bucketed_number(bucket_key)
 
-        # Run bucket value hooks
-        bucket_value = hooks_manager.run_bucket_value_hooks({
+        # Run bucket value modules
+        bucket_value = modules_manager.run_bucket_value_modules({
           feature_key: feature_key,
           bucket_key: bucket_key,
           context: context,
           bucket_value: bucket_value
-        })
+        }) if modules_manager
 
         matched_traffic = nil
         matched_allocation = nil

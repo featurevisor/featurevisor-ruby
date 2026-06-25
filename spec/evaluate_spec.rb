@@ -37,7 +37,7 @@ RSpec.describe Featurevisor::Evaluate do
     end
   end
 
-  describe "evaluate_with_hooks" do
+  describe "evaluate_with_modules" do
     let(:logger) { Featurevisor.create_logger(level: "warn") }
     let(:datafile_reader) do
       Featurevisor::DatafileReader.new(
@@ -50,10 +50,10 @@ RSpec.describe Featurevisor::Evaluate do
         logger: logger
       )
     end
-    let(:hooks_manager) { Featurevisor::Hooks::HooksManager.new(logger: logger) }
+    let(:modules_manager) { Featurevisor::Modules::ModulesManager.new(logger: logger) }
 
     it "should be a method" do
-      expect(Featurevisor::Evaluate).to respond_to(:evaluate_with_hooks)
+      expect(Featurevisor::Evaluate).to respond_to(:evaluate_with_modules)
     end
 
     it "should handle errors gracefully" do
@@ -62,14 +62,14 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "test-feature",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       }
 
       # Mock datafile_reader to raise an error
       allow(datafile_reader).to receive(:get_feature).and_raise(StandardError.new("Test error"))
 
-      result = Featurevisor::Evaluate.evaluate_with_hooks(options)
+      result = Featurevisor::Evaluate.evaluate_with_modules(options)
 
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::ERROR)
       expect(result[:error]).to be_a(StandardError)
@@ -77,18 +77,18 @@ RSpec.describe Featurevisor::Evaluate do
     end
 
     it "should apply default variation value when specified" do
-      hook = Featurevisor::Hooks::Hook.new(
-        name: "test-hook",
-        after: ->(eval, opts) { eval.merge(hook_applied: true) }
+      mod = Featurevisor::Modules::FeaturevisorModule.new(
+        name: "test-module",
+        after: ->(eval, opts) { eval.merge(module_applied: true) }
       )
-      hooks_manager.add(hook)
+      modules_manager.add(mod)
 
       options = {
         type: "variation",
         feature_key: "test-feature",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader,
         default_variation_value: "default"
       }
@@ -96,18 +96,18 @@ RSpec.describe Featurevisor::Evaluate do
       # Mock datafile_reader to return no feature
       allow(datafile_reader).to receive(:get_feature).and_return(nil)
 
-      result = Featurevisor::Evaluate.evaluate_with_hooks(options)
+      result = Featurevisor::Evaluate.evaluate_with_modules(options)
 
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::FEATURE_NOT_FOUND)
-      expect(result[:hook_applied]).to be true
+      expect(result[:module_applied]).to be true
     end
 
     it "should apply default variable value when specified" do
-      hook = Featurevisor::Hooks::Hook.new(
-        name: "test-hook",
-        after: ->(eval, opts) { eval.merge(hook_applied: true) }
+      mod = Featurevisor::Modules::FeaturevisorModule.new(
+        name: "test-module",
+        after: ->(eval, opts) { eval.merge(module_applied: true) }
       )
-      hooks_manager.add(hook)
+      modules_manager.add(mod)
 
       options = {
         type: "variable",
@@ -115,7 +115,7 @@ RSpec.describe Featurevisor::Evaluate do
         variable_key: "test-var",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader,
         default_variable_value: "default"
       }
@@ -123,10 +123,10 @@ RSpec.describe Featurevisor::Evaluate do
       # Mock datafile_reader to return no feature
       allow(datafile_reader).to receive(:get_feature).and_return(nil)
 
-      result = Featurevisor::Evaluate.evaluate_with_hooks(options)
+      result = Featurevisor::Evaluate.evaluate_with_modules(options)
 
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::FEATURE_NOT_FOUND)
-      expect(result[:hook_applied]).to be true
+      expect(result[:module_applied]).to be true
     end
   end
 
@@ -143,7 +143,7 @@ RSpec.describe Featurevisor::Evaluate do
         logger: logger
       )
     end
-    let(:hooks_manager) { Featurevisor::Hooks::HooksManager.new(logger: logger) }
+    let(:modules_manager) { Featurevisor::Modules::ModulesManager.new(logger: logger) }
 
     it "should be a method" do
       expect(Featurevisor::Evaluate).to respond_to(:evaluate)
@@ -155,7 +155,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "non-existent-feature",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       }
 
@@ -177,7 +177,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "test-feature",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader,
         sticky: sticky
       }
@@ -201,7 +201,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "test-feature",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader,
         sticky: sticky
       }
@@ -227,7 +227,7 @@ RSpec.describe Featurevisor::Evaluate do
         variable_key: "test-var",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader,
         sticky: sticky
       }
@@ -260,7 +260,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: feature,
         context: { userId: "123" },
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       }
 
@@ -298,7 +298,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: feature,
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       }
 
@@ -355,7 +355,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: feature,
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       )
 
@@ -398,7 +398,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: feature,
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       )
 
@@ -411,7 +411,7 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "test-feature",
         context: {},
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       }
 
@@ -471,7 +471,7 @@ RSpec.describe Featurevisor::Evaluate do
         variable_key: :test_var,
         context: { country: "nl" },
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       )
 
@@ -533,7 +533,7 @@ RSpec.describe Featurevisor::Evaluate do
         variable_key: :test_var,
         context: { country: "nl" },
         logger: logger,
-        hooks_manager: hooks_manager,
+        modules_manager: modules_manager,
         datafile_reader: datafile_reader
       )
 

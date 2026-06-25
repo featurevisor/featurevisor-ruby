@@ -48,10 +48,18 @@ RSpec.describe FeaturevisorCLI::Parser do
       expect(options.with_tags).to be true
     end
 
-    it "parses camelCase aliases for scope/tag flags" do
+    it "parses legacy compatibility flags" do
       options = FeaturevisorCLI::Parser.parse(["test", "--withScopes", "--withTags"])
       expect(options.with_scopes).to be true
       expect(options.with_tags).to be true
+    end
+
+    it "accepts legacy schema version aliases" do
+      kebab_options = FeaturevisorCLI::Parser.parse(["test", "--schema-version=2"])
+      camel_options = FeaturevisorCLI::Parser.parse(["test", "--schemaVersion=2"])
+
+      expect(kebab_options.schema_version).to eq("2")
+      expect(camel_options.schema_version).to eq("2")
     end
 
     it "sets default values" do

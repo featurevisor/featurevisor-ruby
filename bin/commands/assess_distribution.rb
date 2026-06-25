@@ -127,10 +127,6 @@ module FeaturevisorCLI
         # Build the command similar to Go implementation
         command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
 
-        if @options.schema_version
-          command_parts << "--schemaVersion=#{@options.schema_version}"
-        end
-
         if @options.inflate
           command_parts << "--inflate=#{@options.inflate}"
         end

@@ -77,7 +77,8 @@ RSpec.describe Featurevisor::Events do
         revision: "2",
         previous_revision: "1",
         revision_changed: true,
-        features: %i[feature1 feature2]
+        features: %i[feature1 feature2],
+        replaced: false
       })
     end
 
@@ -104,7 +105,8 @@ RSpec.describe Featurevisor::Events do
         revision: "2",
         previous_revision: "1",
         revision_changed: true,
-        features: %i[feature2 feature3]
+        features: %i[feature2 feature3],
+        replaced: false
       })
     end
 
@@ -129,7 +131,8 @@ RSpec.describe Featurevisor::Events do
         revision: "2",
         previous_revision: "1",
         revision_changed: true,
-        features: %i[feature1 feature2]
+        features: %i[feature1 feature2],
+        replaced: false
       })
     end
   end

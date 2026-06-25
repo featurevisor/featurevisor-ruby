@@ -96,21 +96,11 @@ module FeaturevisorCLI
       def build_datafile(environment)
         puts "Building datafile for environment: #{environment}..."
 
-        # Build the command similar to Go implementation
         command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
-
-        # Add schema version if specified
-        if @options.schema_version && !@options.schema_version.empty?
-          command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--schemaVersion=#{@options.schema_version}", "--json"]
-        end
 
         # Add inflate if specified
         if @options.inflate && @options.inflate > 0
-          if @options.schema_version && !@options.schema_version.empty?
-            command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--schemaVersion=#{@options.schema_version}", "--inflate=#{@options.inflate}", "--json"]
-          else
-            command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--inflate=#{@options.inflate}", "--json"]
-          end
+          command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--inflate=#{@options.inflate}", "--json"]
         end
 
         command = command_parts.join(" ")

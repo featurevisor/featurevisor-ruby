@@ -21,16 +21,11 @@ module FeaturevisorCLI
         # Get project configuration
         config = get_config
         environments = get_environments(config)
+        targets = get_targets
         segments_by_key = get_segments
 
-        # Use CLI schemaVersion option or fallback to config
-        schema_version = @options.schema_version
-        if schema_version.nil? || schema_version.empty?
-          schema_version = config[:schemaVersion]
-        end
-
-        # Build datafiles for all environments (+ scoped/tagged variants)
-        datafiles_by_key = build_datafiles(config, environments, schema_version, @options.inflate)
+        # Build base and Target datafiles for all environments.
+        datafiles_by_key = build_datafiles(environments, targets, @options.inflate)
 
         puts ""
 
@@ -84,6 +79,34 @@ module FeaturevisorCLI
         end
       end
 
+      def get_targets
+        puts "Getting targets..."
+        command = "(cd #{Shellwords.escape(@project_path)} && npx featurevisor list --targets --json)"
+        targets_output = execute_command(command)
+
+        begin
+          targets = JSON.parse(targets_output, symbolize_names: true)
+
+          if targets.is_a?(Array)
+            targets.filter_map do |target|
+              if target.is_a?(Hash)
+                target[:name] || target[:key]
+              else
+                target
+              end
+            end
+          elsif targets.is_a?(Hash)
+            targets.keys
+          else
+            []
+          end
+        rescue JSON::ParserError => e
+          puts "Error: Failed to parse targets JSON: #{e.message}"
+          puts "Command output: #{targets_output}"
+          exit 1
+        end
+      end
+
       def get_environments(config)
         environments = config[:environments]
 
@@ -97,23 +120,15 @@ module FeaturevisorCLI
         environment == false ? false : environment
       end
 
-      def scoped_datafile_key(environment, scope_name)
+      def target_datafile_key(environment, target)
         if environment == false
-          "scope-#{scope_name}"
+          "false-target-#{target}"
         else
-          "#{environment}-scope-#{scope_name}"
+          "#{environment}-target-#{target}"
         end
       end
 
-      def tagged_datafile_key(environment, tag)
-        if environment == false
-          "tag-#{tag}"
-        else
-          "#{environment}-tag-#{tag}"
-        end
-      end
-
-      def build_datafiles(config, environments, schema_version, inflate)
+      def build_datafiles(environments, targets, inflate)
         datafiles_by_key = {}
 
         environments.each do |environment|
@@ -122,61 +137,35 @@ module FeaturevisorCLI
 
           datafiles_by_key[base_datafile_key(environment)] = build_single_datafile(
             environment: environment,
-            schema_version: schema_version,
             inflate: inflate
           )
 
-          if @options.with_scopes && config[:scopes].is_a?(Array)
-            config[:scopes].each do |scope|
-              next unless scope[:name]
-
-              puts "Building scoped datafile for scope: #{scope[:name]}..."
-              datafiles_by_key[scoped_datafile_key(environment, scope[:name])] = build_single_datafile(
-                environment: environment,
-                schema_version: schema_version,
-                inflate: inflate,
-                scope: scope[:name]
-              )
-            end
-          end
-
-          if @options.with_tags && config[:tags].is_a?(Array)
-            config[:tags].each do |tag|
-              puts "Building tagged datafile for tag: #{tag}..."
-              datafiles_by_key[tagged_datafile_key(environment, tag)] = build_single_datafile(
-                environment: environment,
-                schema_version: schema_version,
-                inflate: inflate,
-                tag: tag
-              )
-            end
+          targets.each do |target|
+            puts "Building datafile for target: #{target}..."
+            datafiles_by_key[target_datafile_key(environment, target)] = build_single_datafile(
+              environment: environment,
+              inflate: inflate,
+              target: target
+            )
           end
         end
 
         datafiles_by_key
       end
 
-      def build_single_datafile(environment:, schema_version:, inflate:, scope: nil, tag: nil)
+      def build_single_datafile(environment:, inflate:, target: nil)
         command_parts = ["npx", "featurevisor", "build", "--json"]
 
         if environment != false && !environment.nil?
           command_parts << "--environment=#{Shellwords.escape(environment.to_s)}"
         end
 
-        if schema_version && !schema_version.empty?
-          command_parts << "--schemaVersion=#{Shellwords.escape(schema_version.to_s)}"
-        end
-
         if inflate && inflate > 0
           command_parts << "--inflate=#{inflate}"
         end
 
-        if scope
-          command_parts << "--scope=#{Shellwords.escape(scope.to_s)}"
-        end
-
-        if tag
-          command_parts << "--tag=#{Shellwords.escape(tag.to_s)}"
+        if target
+          command_parts << "--target=#{Shellwords.escape(target.to_s)}"
         end
 
         command = "(cd #{Shellwords.escape(@project_path)} && #{command_parts.join(' ')})"
@@ -224,29 +213,15 @@ module FeaturevisorCLI
         end
       end
 
-      def get_scope_context(config, scope_name)
-        return {} unless scope_name && config[:scopes].is_a?(Array)
-
-        scope = config[:scopes].find { |s| s[:name] == scope_name }
-        return {} unless scope && scope[:context].is_a?(Hash)
-
-        parse_context(scope[:context])
-      end
-
       def resolve_datafile_for_assertion(assertion, datafiles_by_key)
         environment = assertion.key?(:environment) ? assertion[:environment] : false
         environment = false if environment.nil?
 
-        scoped_key = assertion[:scope] ? scoped_datafile_key(environment, assertion[:scope]) : nil
-        tagged_key = assertion[:tag] ? tagged_datafile_key(environment, assertion[:tag]) : nil
+        target_key = assertion[:target] ? target_datafile_key(environment, assertion[:target]) : nil
         base_key = base_datafile_key(environment)
 
-        if scoped_key && datafiles_by_key.key?(scoped_key)
-          return datafiles_by_key[scoped_key]
-        end
-
-        if tagged_key && datafiles_by_key.key?(tagged_key)
-          return datafiles_by_key[tagged_key]
+        if target_key && datafiles_by_key.key?(target_key)
+          return datafiles_by_key[target_key]
         end
 
         datafiles_by_key[base_key]
@@ -259,15 +234,15 @@ module FeaturevisorCLI
           datafile: datafile,
           sticky: sticky,
           log_level: level,
-          hooks: [
+          modules: [
             {
-              name: "tester-hook",
+              name: "test-module",
               bucket_value: ->(options) do
                 at = assertion[:at]
                 if at.is_a?(Numeric)
                   (at * 1000).to_i
                 else
-                  options.bucket_value
+                  options[:bucket_value]
                 end
               end
             }
@@ -297,19 +272,13 @@ module FeaturevisorCLI
                 if datafile.nil?
                   test_result = {
                     has_error: true,
-                    errors: "      ✘ no datafile found for assertion scope/tag/environment combination\n",
+                    errors: "      ✘ no datafile found for assertion target/environment combination\n",
                     duration: 0
                   }
                 end
 
                 if datafile
                   instance = create_tester_instance(datafile, level, assertion)
-                  scope_context = {}
-
-                  if assertion[:scope] && !@options.with_scopes
-                    # If not using scoped datafiles, mimic JS behavior by merging scope context.
-                    scope_context = get_scope_context(config, assertion[:scope])
-                  end
 
                   # Show datafile if requested
                   if @options.show_datafile
@@ -318,7 +287,7 @@ module FeaturevisorCLI
                     puts ""
                   end
 
-                  test_result = run_test_feature(assertion, test[:feature], instance, level, scope_context)
+                  test_result = run_test_feature(assertion, test[:feature], instance, level)
                 end
               elsif test[:segment]
                 segment_key = test[:segment]
@@ -366,9 +335,8 @@ module FeaturevisorCLI
         end
       end
 
-      def run_test_feature(assertion, feature_key, instance, level, scope_context = {})
+      def run_test_feature(assertion, feature_key, instance, level)
         context = parse_context(assertion[:context])
-        context = { **scope_context, **context } if scope_context && !scope_context.empty?
         sticky = parse_sticky(assertion[:sticky])
 
         # Set context and sticky for this assertion

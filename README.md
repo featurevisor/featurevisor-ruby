@@ -1,8 +1,8 @@
 # Featurevisor Ruby SDK <!-- omit in toc -->
 
-This is a port of Featurevisor [JavaScript SDK](https://featurevisor.com/docs/sdks/javascript/) v2.x to Ruby, providing a way to evaluate feature flags, variations, and variables in your Ruby applications.
+This is a port of Featurevisor [JavaScript SDK](https://featurevisor.com/docs/sdks/javascript/) v3.x to Ruby, providing a way to evaluate feature flags, variations, and variables in your Ruby applications.
 
-This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 projects and above.
+This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 
 ## Table of contents <!-- omit in toc -->
 
@@ -33,10 +33,12 @@ This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 proje
   - [`datafile_set`](#datafile_set)
   - [`context_set`](#context_set)
   - [`sticky_set`](#sticky_set)
+  - [`error`](#error)
 - [Evaluation details](#evaluation-details)
-- [Hooks](#hooks)
-  - [Defining a hook](#defining-a-hook)
-  - [Registering hooks](#registering-hooks)
+- [Diagnostics](#diagnostics)
+- [Modules](#modules)
+  - [Defining a module](#defining-a-module)
+  - [Registering modules](#registering-modules)
 - [Child instance](#child-instance)
 - [Close](#close)
 - [CLI usage](#cli-usage)
@@ -362,6 +364,18 @@ f.set_datafile(json_string)
 
 **Important**: When calling `set_datafile()`, ensure JSON is parsed with `symbolize_names: true` if you're parsing it yourself.
 
+By default, `set_datafile(datafile)` merges the incoming datafile into the SDK's current datafile:
+
+- top-level metadata such as `schemaVersion`, `revision`, and `featurevisorVersion` comes from the incoming datafile
+- `segments` are merged, with incoming entries overriding existing ones
+- `features` are merged, with incoming entries overriding existing ones
+
+To fully replace the stored datafile, pass `true` as the second argument:
+
+```ruby
+f.set_datafile(datafile_content, true)
+```
+
 ### Updating datafile
 
 You can set the datafile as many times as you want in your application, which will result in emitting a [`datafile_set`](#datafile_set) event that you can listen and react to accordingly.
@@ -493,6 +507,8 @@ The `features` array will contain keys of features that have either been:
 
 compared to the previous datafile content that existed in the SDK instance.
 
+The event also includes `replaced`, which is `true` when the datafile replaced the previous content instead of merging into it.
+
 ### `context_set`
 
 ```ruby
@@ -514,6 +530,19 @@ unsubscribe = f.on('sticky_set') do |event|
   puts 'Sticky features set'
 end
 ```
+
+### `error`
+
+```ruby
+unsubscribe = f.on('error') do |event|
+  code = event[:code]
+  message = event[:message]
+
+  puts "Featurevisor error: #{code} #{message}"
+end
+```
+
+The `error` event is emitted for diagnostics reported with `level: "error"` or `level: "fatal"`.
 
 ## Evaluation details
 
@@ -547,22 +576,49 @@ And optionally these properties depending on whether you are evaluating a featur
 - `variable_value`: the variable value
 - `variable_schema`: the variable schema
 
-## Hooks
+## Diagnostics
 
-Hooks allow you to intercept the evaluation process and customize it further as per your needs.
+Diagnostics provide structured SDK and module events for observability.
 
-### Defining a hook
+```ruby
+f = Featurevisor.create_instance(
+  on_diagnostic: ->(diagnostic) {
+    level = diagnostic[:level]
+    code = diagnostic[:code]
+    message = diagnostic[:message]
 
-A hook is a simple hash with a unique required `name` and optional functions:
+    puts "[#{level}] #{code}: #{message}"
+  }
+)
+```
+
+If `on_diagnostic` is not provided, diagnostics are sent to the SDK logger.
+
+## Modules
+
+Modules allow you to intercept the evaluation process and customize SDK behavior.
+
+### Defining a module
+
+A module is a simple hash with a unique recommended `name` and optional lifecycle functions:
 
 ```ruby
 require 'featurevisor'
 
-my_custom_hook = {
-  # only required property
-  name: 'my-custom-hook',
+my_custom_module = {
+  # recommended, and used for duplicate detection/removal
+  name: 'my-custom-module',
 
-  # rest of the properties below are all optional per hook
+  # rest of the properties below are all optional per module
+
+  # setup once, when the module is registered
+  setup: ->(api) {
+    revision = api[:get_revision].call
+
+    api[:on_diagnostic].call(->(diagnostic) {
+      puts diagnostic[:message]
+    })
+  },
 
   # before evaluation
   before: ->(options) {
@@ -592,26 +648,43 @@ my_custom_hook = {
   bucket_value: ->(options) {
     # return custom bucket value
     options[:bucket_value]
+  },
+
+  # cleanup when module is removed or SDK is closed
+  close: -> {
+    # cleanup here
   }
 }
 ```
 
-### Registering hooks
+The module API passed to `setup` exposes:
 
-You can register hooks at the time of SDK initialization:
+- `get_revision`
+- `on_diagnostic`
+- `report_diagnostic`
+
+### Registering modules
+
+You can register modules at the time of SDK initialization:
 
 ```ruby
 require 'featurevisor'
 
 f = Featurevisor.create_instance(
-  hooks: [my_custom_hook]
+  modules: [my_custom_module]
 )
 ```
 
 Or after initialization:
 
 ```ruby
-f.add_hook(my_custom_hook)
+remove_module = f.add_module(my_custom_module)
+
+# remove later by calling the returned function
+remove_module.call
+
+# or remove by name
+f.remove_module('my-custom-module')
 ```
 
 ## Child instance
@@ -687,24 +760,17 @@ $ bundle exec featurevisor test \
   --quiet|--verbose \
   --onlyFailures \
   --keyPattern="myFeatureKey" \
-  --assertionPattern="#1" \
-  --with-scopes \
-  --with-tags
+  --assertionPattern="#1"
 ```
 
-`--with-scopes` and `--with-tags` make the Ruby test runner build scoped/tagged datafiles in memory (via `npx featurevisor build --json`) and evaluate matching assertions against those exact datafiles.
-
-If an assertion references `scope` and `--with-scopes` is not provided, the runner still evaluates the assertion by merging that scope's configured context into the assertion context (without building scoped datafiles).
-
-For compatibility, camelCase aliases are also supported: `--withScopes` and `--withTags`.
+The Ruby test runner builds base datafiles and Target datafiles in memory via `npx featurevisor build --json`. When an assertion contains `target`, it is evaluated against the matching Target datafile.
 
 ### Test against local monorepo's example-1
 
 ```bash
 $ cd /absolute/path/to/featurevisor-ruby
-$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1
-$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-scopes
-$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-tags
+$ bundle exec ruby bin/featurevisor test --projectDirectoryPath=/Users/fahad/Projects/featurevisor/featurevisor/examples/example-1 --onlyFailures
+$ make test-example-1
 ```
 
 ### Benchmark
