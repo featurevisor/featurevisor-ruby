@@ -23,6 +23,9 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
   - [Initialize with sticky](#initialize-with-sticky)
   - [Set sticky afterwards](#set-sticky-afterwards)
 - [Setting datafile](#setting-datafile)
+  - [Merging by default](#merging-by-default)
+  - [Replacing](#replacing)
+  - [Loading datafiles on demand](#loading-datafiles-on-demand)
   - [Updating datafile](#updating-datafile)
   - [Interval-based update](#interval-based-update)
 - [Logging](#logging)
@@ -364,16 +367,47 @@ f.set_datafile(json_string)
 
 **Important**: When calling `set_datafile()`, ensure JSON is parsed with `symbolize_names: true` if you're parsing it yourself.
 
+### Merging by default
+
 By default, `set_datafile(datafile)` merges the incoming datafile into the SDK's current datafile:
 
 - top-level metadata such as `schemaVersion`, `revision`, and `featurevisorVersion` comes from the incoming datafile
 - `segments` are merged, with incoming entries overriding existing ones
 - `features` are merged, with incoming entries overriding existing ones
 
+This means you can call `set_datafile` more than once with different datafiles, and the SDK instance accumulates their features and segments together.
+
+### Replacing
+
 To fully replace the stored datafile, pass `true` as the second argument:
 
 ```ruby
 f.set_datafile(datafile_content, true)
+```
+
+### Loading datafiles on demand
+
+Because merging is the default, a single SDK instance can start with a small datafile and load more datafiles later as your application needs them, instead of downloading every feature upfront.
+
+This pairs well with [targets](https://featurevisor.com/docs/targets/), where each target produces a smaller datafile for a specific part of your application:
+
+```ruby
+require "open-uri"
+
+f = Featurevisor.create_instance({})
+
+def load_datafile(f, target)
+  url = "https://cdn.yoursite.com/production/featurevisor-#{target}.json"
+  datafile = JSON.parse(URI.open(url).read, symbolize_names: true)
+
+  # merges into whatever was loaded before
+  f.set_datafile(datafile)
+end
+
+load_datafile(f, "products")
+
+# later, when the user reaches checkout
+load_datafile(f, "checkout")
 ```
 
 ### Updating datafile
