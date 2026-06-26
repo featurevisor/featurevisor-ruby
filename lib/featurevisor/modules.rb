@@ -98,8 +98,8 @@ module Featurevisor
         end
 
         removed.each do |mod|
-          mod.call_close
           @clear_module_diagnostic_subscriptions.call(mod) if @clear_module_diagnostic_subscriptions
+          close_module(mod)
         end
       end
 
@@ -137,13 +137,28 @@ module Featurevisor
 
       def close_all
         @modules.each do |mod|
-          mod.call_close
           @clear_module_diagnostic_subscriptions.call(mod) if @clear_module_diagnostic_subscriptions
+          close_module(mod)
         end
         @modules = []
       end
 
       private
+
+      def close_module(mod)
+        mod.call_close
+      rescue => e
+        report(
+          {
+            level: "error",
+            code: "module_close_error",
+            message: "Module close failed",
+            module_name: mod.name,
+            original_error: e
+          },
+          nil
+        )
+      end
 
       def report(diagnostic, mod)
         @report_diagnostic.call(diagnostic, mod) if @report_diagnostic

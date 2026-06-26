@@ -1427,6 +1427,62 @@ RSpec.describe "sdk: instance" do
     expect(errors.last).to include(code: "duplicate_module")
   end
 
+  it "should report module close errors and keep closing remaining modules" do
+    diagnostics = []
+    errors = []
+    closed = []
+
+    sdk = Featurevisor.create_instance(
+      logger: Featurevisor.create_logger(level: "error"),
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic },
+      modules: [
+        {
+          name: "first",
+          close: -> {
+            closed << "first"
+            raise "first close failed"
+          }
+        },
+        {
+          name: "second",
+          close: -> { closed << "second" }
+        }
+      ]
+    )
+    sdk.on("error", ->(event) { errors << event })
+
+    sdk.close
+
+    expect(closed).to eq(%w[first second])
+    expect(diagnostics).to include(
+      include(
+        level: "error",
+        code: "module_close_error",
+        module_name: "first",
+        original_error: be_a(RuntimeError)
+      )
+    )
+    expect(errors).to include(include(code: "module_close_error", module_name: "first"))
+  end
+
+  it "should report module close errors from unsubscribe once" do
+    diagnostics = []
+
+    sdk = Featurevisor.create_instance(
+      logger: Featurevisor.create_logger(level: "error"),
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic }
+    )
+
+    unsubscribe = sdk.add_module(
+      name: "dynamic",
+      close: -> { raise "dynamic close failed" }
+    )
+    unsubscribe.call
+    unsubscribe.call
+
+    expect(diagnostics.count { |diagnostic| diagnostic[:code] == "module_close_error" && diagnostic[:module_name] == "dynamic" }).to eq(1)
+  end
+
   it "should support module diagnostic subscribe and report behavior" do
     module_api = nil
     received_by_instance = []

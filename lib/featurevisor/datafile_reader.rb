@@ -183,15 +183,11 @@ module Featurevisor
       end
 
       if conditions.is_a?(Hash) && conditions[:not] && conditions[:not].is_a?(Array)
-        return conditions[:not].all? do
-          all_conditions_are_matched({ and: conditions[:not] }, context) == false
-        end
+        return !all_conditions_are_matched({ and: conditions[:not] }, context)
       end
 
       if conditions.is_a?(Hash) && conditions["not"] && conditions["not"].is_a?(Array)
-        return conditions["not"].all? do
-          all_conditions_are_matched({ "and" => conditions["not"] }, context) == false
-        end
+        return !all_conditions_are_matched({ "and" => conditions["not"] }, context)
       end
 
 
@@ -248,15 +244,11 @@ module Featurevisor
         end
 
         if group_segments[:not] && group_segments[:not].is_a?(Array)
-          return group_segments[:not].all? do
-            all_segments_are_matched({ and: group_segments[:not] }, context) == false
-          end
+          return !all_segments_are_matched({ and: group_segments[:not] }, context)
         end
 
         if group_segments["not"] && group_segments["not"].is_a?(Array)
-          return group_segments["not"].all? do
-            all_segments_are_matched({ "and" => group_segments["not"] }, context) == false
-          end
+          return !all_segments_are_matched({ "and" => group_segments["not"] }, context)
         end
 
 

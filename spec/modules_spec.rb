@@ -266,12 +266,15 @@ RSpec.describe Featurevisor::Modules do
     end
 
     it "should return remove function when adding mod" do
-      mod = Featurevisor::Modules::FeaturevisorModule.new(name: "test-mod")
+      closed = []
+      mod = Featurevisor::Modules::FeaturevisorModule.new(name: "test-mod", close: -> { closed << "test-mod" })
       remove_fn = modules_manager.add(mod)
 
       expect(remove_fn).to be_a(Proc)
       remove_fn.call
+      remove_fn.call
       expect(modules_manager.modules).to be_empty
+      expect(closed).to eq(["test-mod"])
     end
 
     it "should close all modules" do

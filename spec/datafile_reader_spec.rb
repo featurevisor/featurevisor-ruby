@@ -416,6 +416,27 @@ RSpec.describe Featurevisor::DatafileReader do
       expect(datafile_reader.all_segments_are_matched(group[:segments], { version: "5.5" })).to be false
       expect(datafile_reader.all_segments_are_matched(group[:segments], { version: 5.5 })).to be false
     end
+
+    it "should treat NOT segment children as an implicit AND" do
+      segments = { not: ["mobileUsers", "netherlands"] }
+
+      expect(datafile_reader.all_segments_are_matched(segments, {
+        country: "nl",
+        deviceType: "mobile"
+      })).to be false
+      expect(datafile_reader.all_segments_are_matched(segments, {
+        country: "nl",
+        deviceType: "desktop"
+      })).to be true
+    end
+
+    it "should treat empty NOT segments as false and nested OR as none-match" do
+      segments = { not: [{ or: ["mobileUsers", "desktopUsers"] }] }
+
+      expect(datafile_reader.all_segments_are_matched(segments, { deviceType: "mobile" })).to be false
+      expect(datafile_reader.all_segments_are_matched(segments, { deviceType: "tv" })).to be true
+      expect(datafile_reader.all_segments_are_matched({ not: [] }, {})).to be false
+    end
   end
 
   describe "conditions" do

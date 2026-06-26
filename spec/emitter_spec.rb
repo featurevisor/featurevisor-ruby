@@ -81,6 +81,24 @@ RSpec.describe Featurevisor::Emitter do
       expect(handled_details.length).to eq(1)
       expect(handled_details[0]).to eq(complex_details)
     end
+
+    it "should trigger a snapshot of listeners when listeners unsubscribe during dispatch" do
+      calls = []
+      unsubscribe_second = nil
+
+      emitter.on("sticky_set", ->(_details) {
+        calls << "first"
+        unsubscribe_second.call
+      })
+      unsubscribe_second = emitter.on("sticky_set", ->(_details) {
+        calls << "second"
+      })
+
+      emitter.trigger("sticky_set")
+      emitter.trigger("sticky_set")
+
+      expect(calls).to eq(%w[first second first])
+    end
   end
 
   describe "unsubscribe functionality" do

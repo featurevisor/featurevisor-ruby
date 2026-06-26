@@ -42,7 +42,7 @@ module Featurevisor
 
       return unless listeners
 
-      listeners.each do |listener|
+      listeners.dup.each do |listener|
         begin
           listener.call(details)
         rescue => err
