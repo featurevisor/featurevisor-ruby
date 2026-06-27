@@ -14,4 +14,6 @@ require_relative "featurevisor/events"
 
 module Featurevisor
   class Error < StandardError; end
+
+  private_constant :DatafileReader
 end

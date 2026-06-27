@@ -36,7 +36,7 @@ module Featurevisor
       @module_diagnostic_subscriptions = []
 
       # datafile
-      @datafile_reader = Featurevisor::DatafileReader.new(
+      @datafile_reader = DatafileReader.new(
         datafile: EMPTY_DATAFILE,
         logger: @logger
       )
@@ -74,7 +74,7 @@ module Featurevisor
       begin
         parsed_datafile = datafile.is_a?(String) ? JSON.parse(datafile, symbolize_names: true) : datafile
         next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile_reader.get_datafile, parsed_datafile)
-        new_datafile_reader = Featurevisor::DatafileReader.new(
+        new_datafile_reader = DatafileReader.new(
           datafile: next_datafile,
           logger: @logger
         )

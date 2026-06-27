@@ -40,7 +40,7 @@ RSpec.describe Featurevisor::Evaluate do
   describe "evaluate_with_modules" do
     let(:logger) { Featurevisor.create_logger(level: "warn") }
     let(:datafile_reader) do
-      Featurevisor::DatafileReader.new(
+      Featurevisor.const_get(:DatafileReader).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
@@ -133,7 +133,7 @@ RSpec.describe Featurevisor::Evaluate do
   describe "evaluate" do
     let(:logger) { Featurevisor.create_logger(level: "warn") }
     let(:datafile_reader) do
-      Featurevisor::DatafileReader.new(
+      Featurevisor.const_get(:DatafileReader).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",

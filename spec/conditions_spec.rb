@@ -3,7 +3,7 @@ require "featurevisor"
 RSpec.describe Featurevisor::Conditions do
   let(:logger) { Featurevisor.create_logger }
   let(:datafile_reader) do
-    Featurevisor::DatafileReader.new(
+    Featurevisor.const_get(:DatafileReader).new(
       datafile: {
         schemaVersion: "2.0",
         revision: "1",

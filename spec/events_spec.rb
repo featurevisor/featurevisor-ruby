@@ -50,7 +50,7 @@ RSpec.describe Featurevisor::Events do
 
   describe ".get_params_for_datafile_set_event" do
     def build_reader(revision:, features:)
-      Featurevisor::DatafileReader.new(
+      Featurevisor.const_get(:DatafileReader).new(
         datafile: {
           schemaVersion: "1.0.0",
           revision: revision,
