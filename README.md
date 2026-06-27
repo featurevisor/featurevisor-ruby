@@ -508,6 +508,24 @@ f = Featurevisor.create_instance(
 
 Further log levels like `info` and `debug` will help you understand how the feature variations and variables are evaluated in the runtime against given context.
 
+## Diagnostics
+
+Diagnostics provide structured SDK and module events for observability.
+
+```ruby
+f = Featurevisor.create_instance(
+  on_diagnostic: ->(diagnostic) {
+    level = diagnostic[:level]
+    code = diagnostic[:code]
+    message = diagnostic[:message]
+
+    puts "[#{level}] #{code}: #{message}"
+  }
+)
+```
+
+If `on_diagnostic` is not provided, diagnostics are sent to the SDK logger.
+
 ## Events
 
 Featurevisor SDK implements a simple event emitter that allows you to listen to events that happen in the runtime.
@@ -609,24 +627,6 @@ And optionally these properties depending on whether you are evaluating a featur
 - `variable_key`: the variable key
 - `variable_value`: the variable value
 - `variable_schema`: the variable schema
-
-## Diagnostics
-
-Diagnostics provide structured SDK and module events for observability.
-
-```ruby
-f = Featurevisor.create_instance(
-  on_diagnostic: ->(diagnostic) {
-    level = diagnostic[:level]
-    code = diagnostic[:code]
-    message = diagnostic[:message]
-
-    puts "[#{level}] #{code}: #{message}"
-  }
-)
-```
-
-If `on_diagnostic` is not provided, diagnostics are sent to the SDK logger.
 
 ## Modules
 
