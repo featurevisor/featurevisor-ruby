@@ -94,7 +94,7 @@ module Featurevisor
         report_diagnostic(
           level: "error",
           code: "invalid_datafile",
-          message: "could not parse datafile",
+          message: "Could not parse datafile",
           original_error: e
         )
       end
