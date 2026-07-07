@@ -73,7 +73,9 @@ module FeaturevisorCLI
         value_output = format_value(output[:value])
         puts "Evaluated value : #{value_output}"
         puts "Total duration  : #{pretty_duration(output[:duration])}"
-        puts "Average duration: #{pretty_duration(output[:duration] / @options.n)}"
+        puts "Minimum duration: #{format_duration_ms(output[:min_duration])}"
+        puts "Average duration: #{format_duration_ms(output[:average_duration])}"
+        puts "Maximum duration: #{format_duration_ms(output[:max_duration])}"
       end
 
       private
@@ -154,61 +156,53 @@ module FeaturevisorCLI
         end
       end
 
-      def benchmark_feature_flag(instance, feature_key, context, n)
-        start_time = Time.now
+      def benchmark_evaluation(n)
+        value = nil
+        total_duration_ns = 0
+        min_duration_ns = nil
+        max_duration_ns = 0
 
-        # Get the actual feature value from the SDK
-        value = instance.is_enabled(feature_key, context)
-
-        # Benchmark the evaluation
         n.times do
-          instance.is_enabled(feature_key, context)
+          start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
+          value = yield
+          duration_ns = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond) - start_time
+
+          total_duration_ns += duration_ns
+          min_duration_ns = duration_ns if min_duration_ns.nil? || duration_ns < min_duration_ns
+          max_duration_ns = duration_ns if duration_ns > max_duration_ns
         end
 
-        duration = Time.now - start_time
+        duration = total_duration_ns / 1_000_000_000.0
 
         {
           value: value,
-          duration: duration
+          duration: duration,
+          min_duration: (min_duration_ns || 0) / 1_000_000_000.0,
+          average_duration: duration / n,
+          max_duration: max_duration_ns / 1_000_000_000.0
         }
+      end
+
+      def format_duration_ms(duration)
+        format("%.6fms", duration * 1000)
+      end
+
+      def benchmark_feature_flag(instance, feature_key, context, n)
+        benchmark_evaluation(n) do
+          instance.is_enabled(feature_key, context)
+        end
       end
 
       def benchmark_feature_variation(instance, feature_key, context, n)
-        start_time = Time.now
-
-        # Get the actual feature variation from the SDK
-        value = instance.get_variation(feature_key, context)
-
-        # Benchmark the evaluation
-        n.times do
+        benchmark_evaluation(n) do
           instance.get_variation(feature_key, context)
         end
-
-        duration = Time.now - start_time
-
-        {
-          value: value,
-          duration: duration
-        }
       end
 
       def benchmark_feature_variable(instance, feature_key, variable_key, context, n)
-        start_time = Time.now
-
-        # Get the actual variable value from the SDK
-        value = instance.get_variable(feature_key, variable_key, context)
-
-        # Benchmark the evaluation
-        n.times do
+        benchmark_evaluation(n) do
           instance.get_variable(feature_key, variable_key, context)
         end
-
-        duration = Time.now - start_time
-
-        {
-          value: value,
-          duration: duration
-        }
       end
 
       def format_value(value)
