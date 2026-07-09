@@ -82,12 +82,11 @@ module Featurevisor
         details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile_reader, new_datafile_reader, replace)
         @datafile_reader = new_datafile_reader
 
-        @logger.info("datafile set", details)
         @emitter.trigger("datafile_set", details)
         report_diagnostic(
           level: "info",
           code: "datafile_set",
-          message: "datafile set",
+          message: "Datafile set",
           details: details
         )
       rescue => e
@@ -117,7 +116,12 @@ module Featurevisor
 
       params = Featurevisor::Events.get_params_for_sticky_set_event(previous_sticky_features, @sticky, replace)
 
-      @logger.info("sticky features set", params)
+      report_diagnostic(
+        level: "info",
+        code: "sticky_set",
+        message: "Sticky features set",
+        details: params
+      )
       @emitter.trigger("sticky_set", params)
     end
 
@@ -176,10 +180,15 @@ module Featurevisor
         replaced: replace
       })
 
-      @logger.debug(replace ? "context replaced" : "context updated", {
-        context: @context,
-        replaced: replace
-      })
+      report_diagnostic(
+        level: "debug",
+        code: "context_set",
+        message: replace ? "Context replaced" : "Context updated",
+        details: {
+          context: @context,
+          replaced: replace
+        }
+      )
     end
 
     # Get context

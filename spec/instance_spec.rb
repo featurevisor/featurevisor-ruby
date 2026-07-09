@@ -18,6 +18,21 @@ RSpec.describe "sdk: instance" do
     expect(sdk.respond_to?(:get_variation)).to be true
   end
 
+  it "reports lifecycle mutation diagnostics" do
+    diagnostics = []
+    sdk = Featurevisor.create_instance(
+      logger: Featurevisor.create_logger(level: "debug"),
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic }
+    )
+
+    sdk.set_datafile(schemaVersion: "2", revision: "1", segments: {}, features: {})
+    sdk.set_sticky(test: { enabled: true })
+    sdk.set_context(country: "nl")
+
+    codes = diagnostics.map { |diagnostic| diagnostic[:code] }
+    expect(codes).to include("datafile_set", "sticky_set", "context_set")
+  end
+
   it "should configure plain bucketBy" do
     captured_bucket_key = ""
 
