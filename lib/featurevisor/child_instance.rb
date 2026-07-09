@@ -94,8 +94,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -113,8 +113,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -134,8 +134,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -155,8 +155,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -176,8 +176,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -197,8 +197,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -218,8 +218,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -239,8 +239,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -260,8 +260,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -281,8 +281,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -300,8 +300,8 @@ module Featurevisor
         },
         feature_keys,
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end

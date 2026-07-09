@@ -309,6 +309,8 @@ This is handy especially when you want to pass all evaluations from a backend ap
 
 For the lifecycle of the SDK instance in your application, you can set some features with sticky values, meaning that they will not be evaluated against the fetched [datafile](https://featurevisor.com/docs/building-datafiles/):
 
+Sticky values belong to an SDK or child instance. Evaluation options do not accept sticky overrides; use `spawn(context, sticky: ...)` when a child needs its own sticky state.
+
 ### Initialize with sticky
 
 ```ruby
@@ -525,6 +527,8 @@ f = Featurevisor.create_instance(
 ```
 
 If `on_diagnostic` is not provided, diagnostics are sent to the SDK logger.
+
+Every diagnostic has `:level`, `:code`, `:message`, and an object-shaped `:details` hash. Optional `:module`, `:moduleName`, and `:originalError` fields describe provenance; evaluation metadata belongs in `:details`.
 
 ## Events
 

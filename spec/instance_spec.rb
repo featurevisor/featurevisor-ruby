@@ -1437,7 +1437,8 @@ RSpec.describe "sdk: instance" do
     expect(diagnostics.last).to include(
       level: "error",
       code: "duplicate_module",
-      module_name: "duplicate"
+      moduleName: "duplicate",
+      details: {}
     )
     expect(errors.last).to include(code: "duplicate_module")
   end
@@ -1473,11 +1474,12 @@ RSpec.describe "sdk: instance" do
       include(
         level: "error",
         code: "module_close_error",
-        module_name: "first",
-        original_error: be_a(RuntimeError)
+        moduleName: "first",
+        originalError: be_a(RuntimeError),
+        details: {}
       )
     )
-    expect(errors).to include(include(code: "module_close_error", module_name: "first"))
+    expect(errors).to include(include(code: "module_close_error", moduleName: "first"))
   end
 
   it "should report module close errors from unsubscribe once" do
@@ -1495,7 +1497,7 @@ RSpec.describe "sdk: instance" do
     unsubscribe.call
     unsubscribe.call
 
-    expect(diagnostics.count { |diagnostic| diagnostic[:code] == "module_close_error" && diagnostic[:module_name] == "dynamic" }).to eq(1)
+    expect(diagnostics.count { |diagnostic| diagnostic[:code] == "module_close_error" && diagnostic[:moduleName] == "dynamic" }).to eq(1)
   end
 
   it "should support module diagnostic subscribe and report behavior" do

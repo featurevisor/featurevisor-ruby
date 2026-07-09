@@ -460,7 +460,7 @@ module Featurevisor
         logger: @logger,
         modules_manager: @modules_manager,
         datafile_reader: @datafile_reader,
-        sticky: options[:sticky] ? { **(@sticky || {}), **options[:sticky] } : @sticky,
+        sticky: options[:__featurevisor_child_sticky] || @sticky,
         default_variation_value: options[:default_variation_value],
         default_variable_value: options[:default_variable_value]
       }
@@ -539,6 +539,18 @@ module Featurevisor
       diagnostic = (diagnostic || {}).dup
       diagnostic[:level] ||= "info"
       diagnostic[:module] ||= source_module.name if source_module && source_module.name
+      details = (diagnostic[:details] || {}).dup
+      legacy_module_name = diagnostic.delete(:module_name)
+      legacy_original_error = diagnostic.delete(:original_error)
+      diagnostic[:moduleName] = legacy_module_name if !diagnostic.key?(:moduleName) && !legacy_module_name.nil?
+      diagnostic[:originalError] = legacy_original_error if !diagnostic.key?(:originalError) && !legacy_original_error.nil?
+      diagnostic.each do |key, value|
+        next if %i[level code message module moduleName originalError details].include?(key)
+
+        details[key] = value
+      end
+      diagnostic.select! { |key, _| %i[level code message module moduleName originalError details].include?(key) }
+      diagnostic[:details] = details
 
       @module_diagnostic_subscriptions.dup.each do |subscription|
         next if source_module && subscription[:module_id] == source_module.id
@@ -550,7 +562,7 @@ module Featurevisor
       if @on_diagnostic
         @on_diagnostic.call(diagnostic) if should_report_diagnostic?(diagnostic[:level], @logger.level)
       else
-        @logger.log(diagnostic[:level], diagnostic[:message], diagnostic.reject { |key, _| key == :message || key == :level })
+        @logger.log(diagnostic[:level], diagnostic[:message], diagnostic)
       end
 
       if %w[error fatal].include?(diagnostic[:level])
