@@ -477,11 +477,12 @@ module Featurevisor
       when "string"
         value.is_a?(String) ? value : nil
       when "integer"
-        value.is_a?(String) ? Integer(value, 10) : (value.is_a?(Integer) ? value : nil)
+        return value if value.is_a?(Integer)
+        value.is_a?(Float) && value.finite? && value == value.to_i ? value.to_i : nil
       when "double"
-        value.is_a?(String) ? Float(value) : (value.is_a?(Numeric) ? value.to_f : nil)
+        value.is_a?(Numeric) && value.finite? ? value.to_f : nil
       when "boolean"
-        value == true
+        value == true || value == false ? value : nil
       when "array"
         value.is_a?(Array) ? value : nil
       when "object"
@@ -556,11 +557,21 @@ module Featurevisor
         next if source_module && subscription[:module_id] == source_module.id
         next unless should_report_diagnostic?(diagnostic[:level], subscription[:level])
 
-        subscription[:handler].call(diagnostic)
+        begin
+          subscription[:handler].call(diagnostic)
+        rescue => e
+          Kernel.warn("[Featurevisor] Diagnostic handler failed: #{e}")
+        end
       end
 
       if @on_diagnostic
-        @on_diagnostic.call(diagnostic) if should_report_diagnostic?(diagnostic[:level], @logger.level)
+        if should_report_diagnostic?(diagnostic[:level], @logger.level)
+          begin
+            @on_diagnostic.call(diagnostic)
+          rescue => e
+            Kernel.warn("[Featurevisor] Diagnostic handler failed: #{e}")
+          end
+        end
       else
         @logger.log(diagnostic[:level], diagnostic[:message], diagnostic)
       end

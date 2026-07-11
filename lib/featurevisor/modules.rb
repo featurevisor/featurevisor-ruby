@@ -83,7 +83,23 @@ module Featurevisor
           return nil
         end
 
-        mod.call_setup(@module_api_factory.call(mod)) if @module_api_factory
+        begin
+          mod.call_setup(@module_api_factory.call(mod)) if @module_api_factory
+        rescue => e
+          @clear_module_diagnostic_subscriptions.call(mod) if @clear_module_diagnostic_subscriptions
+          report(
+            {
+              level: "error",
+              code: "module_setup_error",
+              message: "Module setup failed",
+              module_name: mod.name,
+              original_error: e
+            },
+            nil
+          )
+          close_module(mod)
+          return nil
+        end
         @modules << mod
 
         -> { remove(mod) }

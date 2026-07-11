@@ -354,4 +354,6 @@ module Featurevisor
       segments
     end
   end
+
+  private_constant :DatafileReader
 end

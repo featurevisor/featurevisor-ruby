@@ -1533,6 +1533,18 @@ RSpec.describe "sdk: instance" do
     expect(received_by_module.last).to include(code: "module_warning", module: "reporter")
   end
 
+  it "should isolate diagnostic handler failures" do
+    sdk = nil
+
+    expect {
+      sdk = Featurevisor.create_instance(
+        on_diagnostic: ->(_diagnostic) { raise "handler failed" }
+      )
+      sdk.is_enabled("missing", {})
+      sdk.close
+    }.not_to raise_error
+  end
+
   describe "get_value_by_type" do
     let(:sdk) do
       Featurevisor.create_instance(
@@ -1553,10 +1565,10 @@ RSpec.describe "sdk: instance" do
       expect(sdk.send(:get_value_by_type, "1", "string")).to eq("1")
     end
 
-    it "returns boolean coercion result for boolean type" do
+    it "returns booleans only for boolean type" do
       expect(sdk.send(:get_value_by_type, true, "boolean")).to be true
       expect(sdk.send(:get_value_by_type, false, "boolean")).to be false
-      expect(sdk.send(:get_value_by_type, "true", "boolean")).to be false
+      expect(sdk.send(:get_value_by_type, "true", "boolean")).to be_nil
     end
 
     it "returns object value for object type" do
@@ -1572,12 +1584,14 @@ RSpec.describe "sdk: instance" do
       expect(sdk.send(:get_value_by_type, %w[1 2 3], "array")).to eq(%w[1 2 3])
     end
 
-    it "parses integer for integer type" do
-      expect(sdk.send(:get_value_by_type, "1", "integer")).to eq(1)
+    it "returns integers only for integer type" do
+      expect(sdk.send(:get_value_by_type, 1, "integer")).to eq(1)
+      expect(sdk.send(:get_value_by_type, "1", "integer")).to be_nil
     end
 
-    it "parses double for double type" do
-      expect(sdk.send(:get_value_by_type, "1.1", "double")).to eq(1.1)
+    it "returns finite numbers only for double type" do
+      expect(sdk.send(:get_value_by_type, 1.1, "double")).to eq(1.1)
+      expect(sdk.send(:get_value_by_type, "1.1", "double")).to be_nil
     end
 
     it "returns nil when value is nil" do

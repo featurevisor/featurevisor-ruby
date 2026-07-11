@@ -164,6 +164,27 @@ RSpec.describe Featurevisor::Modules do
       )
     end
 
+    it "should isolate setup failures and close the failed module" do
+      closed = false
+      subscriptions_cleared = false
+      manager = Featurevisor::Modules::ModulesManager.new(
+        report_diagnostic: ->(diagnostic, _mod = nil) { diagnostics << diagnostic },
+        module_api_factory: ->(_mod) { {} },
+        clear_module_diagnostic_subscriptions: ->(_mod) { subscriptions_cleared = true }
+      )
+      mod = Featurevisor::Modules::FeaturevisorModule.new(
+        name: "broken-setup",
+        setup: ->(_api) { raise "setup failed" },
+        close: -> { closed = true }
+      )
+
+      expect(manager.add(mod)).to be_nil
+      expect(manager.modules).to be_empty
+      expect(closed).to be true
+      expect(subscriptions_cleared).to be true
+      expect(diagnostics.last).to include(code: "module_setup_error", module_name: "broken-setup")
+    end
+
     it "should remove modules by name" do
       closed = false
       mod = Featurevisor::Modules::FeaturevisorModule.new(name: "test-mod", close: -> { closed = true })
