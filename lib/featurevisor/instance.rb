@@ -55,7 +55,7 @@ module Featurevisor
       report_diagnostic(
         level: "info",
         code: "sdk_initialized",
-        message: "Featurevisor SDK initialized"
+        message: "SDK initialized"
       )
     end
 
@@ -95,13 +95,13 @@ module Featurevisor
         details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile_reader, new_datafile_reader, replace)
         @datafile_reader = new_datafile_reader
 
-        @emitter.trigger("datafile_set", details)
         report_diagnostic(
           level: "info",
           code: "datafile_set",
           message: "Datafile set",
           details: details
         )
+        @emitter.trigger("datafile_set", details)
       rescue => e
         report_diagnostic(
           level: "error",
@@ -613,8 +613,8 @@ module Featurevisor
         )
       end
 
-      if %w[error fatal].include?(diagnostic[:level])
-        @emitter.trigger("error", diagnostic)
+      if diagnostic[:level] == "error"
+        @emitter.trigger("error", diagnostic: diagnostic)
       end
     end
 

@@ -557,14 +557,15 @@ end
 
 ```ruby
 unsubscribe = f.on('error') do |event|
-  code = event[:code]
-  message = event[:message]
+  diagnostic = event[:diagnostic]
+  code = diagnostic[:code]
+  message = diagnostic[:message]
 
   puts "Featurevisor error: #{code} #{message}"
 end
 ```
 
-The `error` event is emitted for diagnostics reported with `level: "error"` or `level: "fatal"`.
+The `error` event is emitted for diagnostics reported with `level: "error"`.
 
 ## Evaluation details
 

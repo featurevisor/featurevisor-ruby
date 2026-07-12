@@ -1443,7 +1443,7 @@ RSpec.describe "sdk: instance" do
       moduleName: "duplicate",
       details: {}
     )
-    expect(errors.last).to include(code: "duplicate_module")
+    expect(errors.last).to include(diagnostic: include(code: "duplicate_module"))
   end
 
   it "should report module close errors and keep closing remaining modules" do
@@ -1482,7 +1482,7 @@ RSpec.describe "sdk: instance" do
         details: {}
       )
     )
-    expect(errors).to include(include(code: "module_close_error", moduleName: "first"))
+    expect(errors).to include(include(diagnostic: include(code: "module_close_error", moduleName: "first")))
   end
 
   it "should report module close errors from unsubscribe once" do

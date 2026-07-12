@@ -78,7 +78,7 @@ module Featurevisor
               message: "Duplicate module name",
               module_name: mod.name
             },
-            mod
+            nil
           )
           return nil
         end
