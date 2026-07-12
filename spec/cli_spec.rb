@@ -38,6 +38,11 @@ RSpec.describe FeaturevisorCLI do
 end
 
 RSpec.describe FeaturevisorCLI::Parser do
+  it "parses and deduplicates repeated targets" do
+    options = described_class.parse(["test", "--target=web", "--target=mobile", "--target=web"])
+    expect(options.targets).to eq(["web", "mobile"])
+  end
+
   describe ".parse" do
     it "parses basic options" do
       options = FeaturevisorCLI::Parser.parse(["test", "--verbose", "--n=5000", "--with-scopes", "--with-tags"])

@@ -21,7 +21,13 @@ module FeaturevisorCLI
         # Get project configuration
         config = get_config
         environments = get_environments(config)
-        targets = get_targets
+        available_targets = get_targets
+        unknown_target = @options.targets.find { |target| !available_targets.include?(target) }
+        if unknown_target
+          puts "Unknown target \"#{unknown_target}\". Available targets: #{available_targets.empty? ? "none" : available_targets.join(", ")}."
+          exit 1
+        end
+        targets = @options.targets.empty? ? available_targets : @options.targets
         segments_by_key = get_segments
 
         # Build base and Target datafiles for all environments.
@@ -259,6 +265,12 @@ module FeaturevisorCLI
         tests.each do |test|
           test_key = test[:key]
           assertions = test[:assertions] || []
+          if test[:feature] && !@options.targets.empty?
+            assertions = assertions.select do |assertion|
+              assertion[:target].nil? || @options.targets.include?(assertion[:target])
+            end
+            next if assertions.empty?
+          end
           results = ""
           test_has_error = false
           test_duration = 0.0

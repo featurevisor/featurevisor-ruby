@@ -809,6 +809,8 @@ $ bundle exec featurevisor test \
 
 The Ruby test runner builds base datafiles and Target datafiles in memory via `npx featurevisor build --json`. When an assertion contains `target`, it is evaluated against the matching Target datafile.
 
+All three commands accept repeatable `--target=<target>` options. `test` builds only the selected Target datafiles and runs untargeted assertions plus assertions for those targets. `benchmark` and `assess-distribution` run independently against every selected Target datafile. Without `--target`, existing project-wide behavior is preserved. Project definitions, test specs, Target discovery, and datafile generation continue to come from the Node.js CLI.
+
 ### Test against local monorepo's example-1
 
 ```bash
@@ -819,7 +821,7 @@ $ make test-example-1
 
 ### Benchmark
 
-Learn more about benchmarking [here](https://featurevisor.com/docs/cmd/#benchmarking).
+Learn more about benchmarking [here](https://featurevisor.com/docs/cli/#benchmarking).
 
 ```bash
 $ bundle exec featurevisor benchmark \
@@ -832,7 +834,7 @@ $ bundle exec featurevisor benchmark \
 
 ### Assess distribution
 
-Learn more about assessing distribution [here](https://featurevisor.com/docs/cmd/#assess-distribution).
+Learn more about assessing distribution [here](https://featurevisor.com/docs/cli/#assess-distribution).
 
 ```bash
 $ bundle exec featurevisor assess-distribution \

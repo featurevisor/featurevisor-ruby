@@ -27,22 +27,25 @@ module FeaturevisorCLI
           exit 1
         end
 
-        puts ""
-        puts "Running benchmark for feature \"#{@options.feature}\"..."
-        puts ""
-
-        # Parse context if provided
         context = parse_context
+        targets = resolve_targets
+        (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+      end
 
-        puts "Building datafile containing all features for \"#{@options.environment}\"..."
+      private
+
+      def run_for_target(context, target)
         datafile_build_start = Time.now
-
-        # Build datafile by executing the featurevisor build command
-        datafile = build_datafile(@options.environment)
+        datafile = build_datafile(@options.environment, target)
         datafile_build_duration = Time.now - datafile_build_start
         datafile_build_duration_ms = (datafile_build_duration * 1000).round
 
-        puts "Datafile build duration: #{datafile_build_duration_ms}ms"
+        puts "\nBenchmark Featurevisor feature"
+        puts "  Feature: #{@options.feature}"
+        puts "  Environment: #{@options.environment}"
+        puts "  Target: #{target}" if target
+        puts "  Iterations: #{@options.n}"
+        puts "  Build duration: #{datafile_build_duration_ms}ms"
 
         # Calculate datafile size
         datafile_size = datafile.to_json.bytesize
@@ -78,7 +81,21 @@ module FeaturevisorCLI
         puts "Maximum duration: #{format_duration_ms(output[:max_duration])}"
       end
 
-      private
+      def resolve_targets
+        return [] if @options.targets.empty?
+        stdout, stderr, status = Open3.capture3("npx", "featurevisor", "list", "--targets", "--json", chdir: @project_path)
+        unless status.success?
+          puts stderr
+          exit 1
+        end
+        available = JSON.parse(stdout).map { |target| target.is_a?(Hash) ? (target["key"] || target["name"]) : target }
+        unknown = @options.targets.find { |target| !available.include?(target) }
+        if unknown
+          puts "Unknown target \"#{unknown}\". Available targets: #{available.empty? ? "none" : available.join(", ")}."
+          exit 1
+        end
+        @options.targets
+      end
 
       def parse_context
         if @options.context
@@ -95,14 +112,15 @@ module FeaturevisorCLI
         end
       end
 
-      def build_datafile(environment)
+      def build_datafile(environment, target = nil)
         puts "Building datafile for environment: #{environment}..."
 
         command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
+        command_parts << "--target=#{target}" if target
 
         # Add inflate if specified
         if @options.inflate && @options.inflate > 0
-          command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--inflate=#{@options.inflate}", "--json"]
+          command_parts << "--inflate=#{@options.inflate}"
         end
 
         command = command_parts.join(" ")
