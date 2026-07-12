@@ -2,7 +2,7 @@ require "featurevisor"
 
 RSpec.describe Featurevisor::Modules do
   describe "Module" do
-    let(:logger) { Featurevisor.create_logger(level: "warn") }
+    let(:logger) { Featurevisor.const_get(:Logger).new(level: "warn") }
 
     it "should be a class" do
       expect(Featurevisor::Modules::FeaturevisorModule).to be_a(Class)
@@ -123,7 +123,7 @@ RSpec.describe Featurevisor::Modules do
   end
 
   describe "ModulesManager" do
-    let(:logger) { Featurevisor.create_logger(level: "warn") }
+    let(:logger) { Featurevisor.const_get(:Logger).new(level: "warn") }
     let(:diagnostics) { [] }
     let(:modules_manager) do
       Featurevisor::Modules::ModulesManager.new(

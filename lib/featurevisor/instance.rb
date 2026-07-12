@@ -6,8 +6,6 @@ require "securerandom"
 module Featurevisor
   # Instance class for managing feature flag evaluations
   class Instance
-    attr_reader :context, :logger, :sticky, :datafile_reader, :modules_manager, :emitter
-
     # Empty datafile template
     EMPTY_DATAFILE = {
       schemaVersion: "2",
@@ -21,14 +19,16 @@ module Featurevisor
     # @option options [Hash, String] :datafile Datafile content or JSON string
     # @option options [Hash] :context Initial context
     # @option options [String] :log_level Log level
-    # @option options [Logger] :logger Logger instance
     # @option options [Hash] :sticky Sticky features
     # @option options [Array<Hash, FeaturevisorModule>] :modules Array of modules
     # @option options [Proc] :on_diagnostic Diagnostic handler
     def initialize(options = {})
       # from options
       @context = options[:context] || {}
-      @logger = options[:logger] || Featurevisor.create_logger(level: options[:log_level] || "info")
+      @logger = Logger.new(
+        level: options[:log_level] || "info",
+        handler: method(:handle_internal_log)
+      )
       @on_diagnostic = options[:on_diagnostic] || options[:onDiagnostic]
       @emitter = Featurevisor::Emitter.new
       @sticky = options[:sticky] || {}
@@ -64,6 +64,19 @@ module Featurevisor
     def set_log_level(level)
       @logger.set_level(level)
     end
+
+    def handle_internal_log(level, message, details = nil)
+      details = (details || {}).dup
+      code = details[:reason] || details["reason"] || message
+      code = "deprecated_feature" if message == "feature is deprecated"
+      code = "deprecated_variable" if message == "variable is deprecated"
+      code = "feature_not_found" if message == "feature not found"
+      code = "variable_not_found" if message == "variable schema not found"
+      code = "no_variations" if message == "no variations"
+      code = "invalid_bucket_by" if message == "invalid bucketBy"
+      report_diagnostic(level: level, code: code.to_s, message: message, details: details)
+    end
+    private :handle_internal_log
 
     # Set the datafile
     # @param datafile [Hash, String] Datafile content or JSON string
@@ -129,6 +142,26 @@ module Featurevisor
     # @return [String] Revision string
     def get_revision
       @datafile_reader.get_revision
+    end
+
+    def get_schema_version
+      @datafile_reader.get_schema_version
+    end
+
+    def get_segment(segment_key)
+      @datafile_reader.get_segment(segment_key)
+    end
+
+    def get_feature_keys
+      @datafile_reader.get_feature_keys
+    end
+
+    def get_variable_keys(feature_key)
+      @datafile_reader.get_variable_keys(feature_key)
+    end
+
+    def has_variations?(feature_key)
+      @datafile_reader.has_variations?(feature_key)
     end
 
     # Get a feature by key
@@ -573,7 +606,11 @@ module Featurevisor
           end
         end
       else
-        @logger.log(diagnostic[:level], diagnostic[:message], diagnostic)
+        Logger.new(level: @logger.level).log(
+          diagnostic[:level],
+          diagnostic[:message],
+          diagnostic
+        )
       end
 
       if %w[error fatal].include?(diagnostic[:level])
@@ -595,7 +632,7 @@ module Featurevisor
   # Create a new Featurevisor instance
   # @param options [Hash] Instance options
   # @return [Instance] New instance
-  def self.create_instance(options = {})
+  def self.create_featurevisor(options = {})
     Instance.new(options)
   end
 end

@@ -1,7 +1,7 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor.const_get(:DatafileReader) do
-  let(:logger) { Featurevisor.create_logger }
+  let(:logger) { Featurevisor.const_get(:Logger).new }
 
   describe "basic functionality" do
     it "should be a class" do

@@ -8,7 +8,7 @@ RSpec.describe "Featurevisor v3 conformance" do
     fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
     reader = Featurevisor.const_get(:DatafileReader).new(
       datafile: { schemaVersion: "2", revision: "conformance", segments: {}, features: {} },
-      logger: Featurevisor::Logger.new(level: "fatal")
+      logger: Featurevisor.const_get(:Logger).new(level: "fatal")
     )
     traffic = { allocation: fixture.dig(:bucketing, :allocations) }
 

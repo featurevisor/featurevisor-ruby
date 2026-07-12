@@ -58,7 +58,7 @@ module FeaturevisorCLI
         datafile = build_datafile(@options.environment, target)
 
         # Create SDK instance
-        instance = create_instance(datafile)
+        instance = create_featurevisor(datafile)
 
         # Check if feature has variations
         feature = instance.get_feature(@options.feature)
@@ -178,9 +178,9 @@ module FeaturevisorCLI
         [stdout, stderr, exit_status.exitstatus]
       end
 
-      def create_instance(datafile)
+      def create_featurevisor(datafile)
         # Create SDK instance
-        Featurevisor.create_instance(
+        Featurevisor.create_featurevisor(
           datafile: datafile,
           log_level: get_logger_level
         )

@@ -236,7 +236,7 @@ module FeaturevisorCLI
       def create_tester_instance(datafile, level, assertion)
         sticky = parse_sticky(assertion[:sticky])
 
-        Featurevisor.create_instance(
+        Featurevisor.create_featurevisor(
           datafile: datafile,
           sticky: sticky,
           log_level: level,
@@ -660,7 +660,7 @@ module FeaturevisorCLI
         }
 
         # Create SDK instance for segment testing
-        instance = Featurevisor.create_instance(
+        instance = Featurevisor.create_featurevisor(
           datafile: datafile,
           log_level: level
         )
@@ -748,16 +748,14 @@ module FeaturevisorCLI
           return instance.send(method_name, feature_key, variable_key, context, override_options)
         end
 
-        if instance.respond_to?(:parent) && instance.respond_to?(:sticky)
-          parent = instance.parent
-          combined_context = if instance.respond_to?(:context)
-            { **(instance.context || {}), **context }
-          else
-            context
-          end
+        if instance.is_a?(Featurevisor::ChildInstance)
+          parent = instance.instance_variable_get(:@parent)
+          child_context = instance.instance_variable_get(:@context) || {}
+          child_sticky = instance.instance_variable_get(:@sticky)
+          combined_context = { **child_context, **context }
 
           combined_options = {
-            sticky: instance.sticky,
+            __featurevisor_child_sticky: child_sticky,
             **override_options
           }
 

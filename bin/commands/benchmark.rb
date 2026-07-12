@@ -52,7 +52,7 @@ module FeaturevisorCLI
         puts "Datafile size: #{(datafile_size / 1024.0).round(2)} kB"
 
         # Create SDK instance with the datafile
-        instance = create_instance(datafile)
+        instance = create_featurevisor(datafile)
         puts "...SDK initialized"
 
         puts ""
@@ -152,9 +152,9 @@ module FeaturevisorCLI
         stdout
       end
 
-      def create_instance(datafile)
+      def create_featurevisor(datafile)
         # Create a real Featurevisor instance
-        instance = Featurevisor.create_instance(
+        instance = Featurevisor.create_featurevisor(
           log_level: get_logger_level
         )
 

@@ -3,8 +3,6 @@
 module Featurevisor
   # Child instance class for managing child contexts and sticky features
   class ChildInstance
-    attr_reader :parent, :context, :sticky, :emitter
-
     # Initialize a new child instance
     # @param options [Hash] Child instance options
     # @option options [Instance] :parent Parent instance

@@ -2,7 +2,7 @@ require "featurevisor"
 
 RSpec.describe "sdk: child" do
   it "should create a child instance" do
-    f = Featurevisor.create_instance(
+    f = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",

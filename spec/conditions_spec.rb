@@ -1,7 +1,7 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor::Conditions do
-  let(:logger) { Featurevisor.create_logger }
+  let(:logger) { Featurevisor.const_get(:Logger).new }
   let(:datafile_reader) do
     Featurevisor.const_get(:DatafileReader).new(
       datafile: {

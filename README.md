@@ -7,6 +7,7 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 ## Table of contents <!-- omit in toc -->
 
 - [Installation](#installation)
+- [Public API](#public-api)
 - [Initialization](#initialization)
 - [Evaluation types](#evaluation-types)
 - [Context](#context)
@@ -28,17 +29,15 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
   - [Loading datafiles on demand](#loading-datafiles-on-demand)
   - [Updating datafile](#updating-datafile)
   - [Interval-based update](#interval-based-update)
-- [Logging](#logging)
+- [Evaluation details](#evaluation-details)
+- [Diagnostics](#diagnostics)
   - [Levels](#levels)
-  - [Customizing levels](#customizing-levels)
   - [Handler](#handler)
 - [Events](#events)
   - [`datafile_set`](#datafile_set)
   - [`context_set`](#context_set)
   - [`sticky_set`](#sticky_set)
   - [`error`](#error)
-- [Evaluation details](#evaluation-details)
-- [Diagnostics](#diagnostics)
 - [Modules](#modules)
   - [Defining a module](#defining-a-module)
   - [Registering modules](#registering-modules)
@@ -77,6 +76,18 @@ Or install it yourself as:
 $ gem install featurevisor
 ```
 
+## Public API
+
+The main runtime API is `Featurevisor.create_featurevisor`:
+
+```ruby
+f = Featurevisor.create_featurevisor(
+  datafile: datafile_content
+)
+```
+
+Most applications only need this factory and the returned `Featurevisor::Instance`. Public extension and observability APIs include modules, diagnostics, events, and the datafile structures accepted by the factory.
+
 ## Initialization
 
 The SDK can be initialized by passing [datafile](https://featurevisor.com/docs/building-datafiles/) content directly:
@@ -94,7 +105,7 @@ response = Net::HTTP.get_response(URI(datafile_url))
 datafile_content = JSON.parse(response.body, symbolize_names: true)
 
 # Create SDK instance
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   datafile: datafile_content
 )
 ```
@@ -106,10 +117,10 @@ Alternatively, you can pass a JSON string directly and the SDK will parse it aut
 ```ruby
 # Option 1: Parse JSON yourself (recommended)
 datafile_content = JSON.parse(json_string, symbolize_names: true)
-f = Featurevisor.create_instance(datafile: datafile_content)
+f = Featurevisor.create_featurevisor(datafile: datafile_content)
 
 # Option 2: Pass JSON string directly (automatic parsing)
-f = Featurevisor.create_instance(datafile: json_string)
+f = Featurevisor.create_featurevisor(datafile: json_string)
 ```
 
 ## Evaluation types
@@ -147,7 +158,7 @@ You can set context at the time of initialization:
 ```ruby
 require 'featurevisor'
 
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   context: {
     deviceId: '123',
     country: 'nl'
@@ -318,7 +329,7 @@ Sticky values belong to an SDK or child instance. Evaluation options do not acce
 ```ruby
 require 'featurevisor'
 
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   sticky: {
     myFeatureKey: {
       enabled: true,
@@ -398,7 +409,7 @@ This pairs well with [targets](https://featurevisor.com/docs/targets/), where ea
 ```ruby
 require "open-uri"
 
-f = Featurevisor.create_instance({})
+f = Featurevisor.create_featurevisor({})
 
 def load_datafile(f, target)
   url = "https://cdn.yoursite.com/production/featurevisor-#{target}.json"
@@ -452,87 +463,38 @@ end
 Thread.new { update_datafile(f, datafile_url) }
 ```
 
-## Logging
+## Diagnostics
 
-By default, Featurevisor SDKs will print out logs to the console for `info` level and above.
+By default, Featurevisor reports diagnostics to the console for `info` level and above with a `[Featurevisor]` prefix.
 
 ### Levels
 
-These are all the available log levels:
+Available diagnostic levels are `fatal`, `error`, `warn`, `info`, and `debug`.
 
-- `error`
-- `warn`
-- `info`
-- `debug`
-
-### Customizing levels
-
-If you choose `debug` level to make the logs more verbose, you can set it at the time of SDK initialization.
-
-Setting `debug` level will print out all logs, including `info`, `warn`, and `error` levels.
+Set the level during initialization or update it afterwards:
 
 ```ruby
-require 'featurevisor'
-
-f = Featurevisor.create_instance(
-  logger: Featurevisor.create_logger(level: 'debug')
-)
-```
-
-Alternatively, you can also set `log_level` directly:
-
-```ruby
-f = Featurevisor.create_instance(
-  log_level: 'debug'
-)
-```
-
-You can also set log level from SDK instance afterwards:
-
-```ruby
-f.set_log_level('debug')
+f = Featurevisor.create_featurevisor(log_level: "debug")
+f.set_log_level("info")
 ```
 
 ### Handler
 
-You can also pass your own log handler, if you do not wish to print the logs to the console:
+Use `on_diagnostic` to send structured diagnostics to your observability system:
 
 ```ruby
-require 'featurevisor'
-
-f = Featurevisor.create_instance(
-  logger: Featurevisor.create_logger(
-    level: 'info',
-    handler: ->(level, message, details) {
-      # do something with the log
-    }
-  )
-)
-```
-
-Further log levels like `info` and `debug` will help you understand how the feature variations and variables are evaluated in the runtime against given context.
-
-## Diagnostics
-
-Diagnostics provide structured SDK and module events for observability.
-
-```ruby
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
+  log_level: "info",
   on_diagnostic: ->(diagnostic) {
-    level = diagnostic[:level]
-    code = diagnostic[:code]
-    message = diagnostic[:message]
-
-    puts "[#{level}] #{code}: #{message}"
+    puts "#{diagnostic[:level]} #{diagnostic[:code]} #{diagnostic[:message]}"
   }
 )
 ```
 
-If `on_diagnostic` is not provided, diagnostics are sent to the SDK logger.
-
-Every diagnostic has `:level`, `:code`, `:message`, and an object-shaped `:details` hash. Optional `:module`, `:moduleName`, and `:originalError` fields describe provenance; evaluation metadata belongs in `:details`.
+Every diagnostic has `:level`, `:code`, `:message`, and an object-shaped `:details` hash. Optional `:module`, `:moduleName`, and `:originalError` fields describe provenance. Evaluation metadata belongs in `:details`.
 
 Diagnostic handlers are isolated from SDK behavior. An exception in a handler does not stop other handlers or evaluations.
+
 
 ## Events
 
@@ -714,7 +676,7 @@ You can register modules at the time of SDK initialization:
 ```ruby
 require 'featurevisor'
 
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   modules: [my_custom_module]
 )
 ```

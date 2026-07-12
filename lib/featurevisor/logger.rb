@@ -113,13 +113,6 @@ module Featurevisor
     end
   end
 
-  # Create a new logger instance
-  # @param options [Hash] Logger options
-  # @return [Logger] New logger instance
-  def self.create_logger(options = {})
-    Logger.new(options)
-  end
-
   # Default log handler function
   # @param level [String] Log level
   # @param message [String] Log message

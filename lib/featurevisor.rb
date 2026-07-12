@@ -16,4 +16,5 @@ module Featurevisor
   class Error < StandardError; end
 
   private_constant :DatafileReader
+  private_constant :Logger
 end

@@ -1,6 +1,6 @@
 require "featurevisor"
 
-RSpec.describe Featurevisor::Logger do
+RSpec.describe Featurevisor.const_get(:Logger) do
   let(:console_output) { StringIO.new }
   let(:original_stdout) { $stdout }
   let(:original_stderr) { $stderr }
@@ -17,20 +17,20 @@ RSpec.describe Featurevisor::Logger do
 
   describe "create_logger" do
     it "should create a logger with default options" do
-      logger = Featurevisor.create_logger
-      expect(logger).to be_instance_of(Featurevisor::Logger)
+      logger = Featurevisor.const_get(:Logger).new
+      expect(logger).to be_instance_of(Featurevisor.const_get(:Logger))
     end
 
     it "should create a logger with custom level" do
-      logger = Featurevisor.create_logger(level: "debug")
-      expect(logger).to be_instance_of(Featurevisor::Logger)
+      logger = Featurevisor.const_get(:Logger).new(level: "debug")
+      expect(logger).to be_instance_of(Featurevisor.const_get(:Logger))
     end
 
     it "should create a logger with custom handler" do
       custom_handler = double("custom_handler")
       expect(custom_handler).to receive(:call).with("info", "test message", nil)
 
-      logger = Featurevisor.create_logger(handler: custom_handler)
+      logger = Featurevisor.const_get(:Logger).new(handler: custom_handler)
       logger.info("test message")
     end
   end
@@ -38,7 +38,7 @@ RSpec.describe Featurevisor::Logger do
   describe "Logger" do
     describe "constructor" do
       it "should use default log level when none provided" do
-        logger = Featurevisor::Logger.new
+        logger = Featurevisor.const_get(:Logger).new
         logger.debug("debug message")
 
         # Debug should not be logged with default level (info)
@@ -46,7 +46,7 @@ RSpec.describe Featurevisor::Logger do
       end
 
       it "should use provided log level" do
-        logger = Featurevisor::Logger.new(level: "debug")
+        logger = Featurevisor.const_get(:Logger).new(level: "debug")
         logger.debug("debug message")
 
         # Debug should be logged with debug level
@@ -55,7 +55,7 @@ RSpec.describe Featurevisor::Logger do
       end
 
       it "should use default handler when none provided" do
-        logger = Featurevisor::Logger.new
+        logger = Featurevisor.const_get(:Logger).new
         logger.info("test message")
 
         expect(console_output.string).to include("[Featurevisor]")
@@ -66,14 +66,14 @@ RSpec.describe Featurevisor::Logger do
         custom_handler = double("custom_handler")
         expect(custom_handler).to receive(:call).with("info", "test message", nil)
 
-        logger = Featurevisor::Logger.new(handler: custom_handler)
+        logger = Featurevisor.const_get(:Logger).new(handler: custom_handler)
         logger.info("test message")
       end
     end
 
     describe "set_level" do
       it "should update the log level" do
-        logger = Featurevisor::Logger.new(level: "info")
+        logger = Featurevisor.const_get(:Logger).new(level: "info")
 
         # Debug should not be logged initially
         logger.debug("debug message")
@@ -92,14 +92,14 @@ RSpec.describe Featurevisor::Logger do
 
         levels.each do |level|
           console_output.truncate(0)
-          logger = Featurevisor::Logger.new(level: level)
+          logger = Featurevisor.const_get(:Logger).new(level: level)
           logger.error("error message")
           expect(console_output.string).to include("error message")
         end
       end
 
       it "should log warn messages at warn level and above" do
-        logger = Featurevisor::Logger.new(level: "warn")
+        logger = Featurevisor.const_get(:Logger).new(level: "warn")
 
         logger.warn("warn message")
         expect(console_output.string).to include("warn message")
@@ -109,21 +109,21 @@ RSpec.describe Featurevisor::Logger do
       end
 
       it "should not log info messages at warn level" do
-        logger = Featurevisor::Logger.new(level: "warn")
+        logger = Featurevisor.const_get(:Logger).new(level: "warn")
 
         logger.info("info message")
         expect(console_output.string).not_to include("info message")
       end
 
       it "should not log debug messages at info level" do
-        logger = Featurevisor::Logger.new(level: "info")
+        logger = Featurevisor.const_get(:Logger).new(level: "info")
 
         logger.debug("debug message")
         expect(console_output.string).not_to include("debug message")
       end
 
       it "should log all messages at debug level" do
-        logger = Featurevisor::Logger.new(level: "debug")
+        logger = Featurevisor.const_get(:Logger).new(level: "debug")
 
         logger.debug("debug message")
         expect(console_output.string).to include("debug message")
@@ -140,7 +140,7 @@ RSpec.describe Featurevisor::Logger do
     end
 
     describe "convenience methods" do
-      let(:logger) { Featurevisor::Logger.new(level: "debug") }
+      let(:logger) { Featurevisor.const_get(:Logger).new(level: "debug") }
 
       it "should call debug method correctly" do
         logger.debug("debug message")
@@ -183,7 +183,7 @@ RSpec.describe Featurevisor::Logger do
         custom_handler = double("custom_handler")
         expect(custom_handler).to receive(:call).with("info", "test message", { test: true })
 
-        logger = Featurevisor::Logger.new(handler: custom_handler, level: "debug")
+        logger = Featurevisor.const_get(:Logger).new(handler: custom_handler, level: "debug")
         details = { test: true }
 
         logger.log("info", "test message", details)
@@ -193,7 +193,7 @@ RSpec.describe Featurevisor::Logger do
         custom_handler = double("custom_handler")
         expect(custom_handler).not_to receive(:call)
 
-        logger = Featurevisor::Logger.new(handler: custom_handler, level: "warn")
+        logger = Featurevisor.const_get(:Logger).new(handler: custom_handler, level: "warn")
         logger.log("debug", "debug message")
       end
     end

@@ -1,7 +1,7 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor::Events do
-  let(:logger) { Featurevisor.create_logger(level: "error") }
+  let(:logger) { Featurevisor.const_get(:Logger).new(level: "error") }
 
   describe ".get_params_for_sticky_set_event" do
     it "should get params for sticky set event: empty to new" do
