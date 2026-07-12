@@ -85,7 +85,18 @@ module Featurevisor
       return if @closed
 
       begin
-        parsed_datafile = datafile.is_a?(String) ? JSON.parse(datafile, symbolize_names: true) : datafile
+        parsed_datafile = if datafile.is_a?(String)
+                            JSON.parse(datafile, symbolize_names: true)
+                          elsif datafile.is_a?(Hash)
+                            JSON.parse(JSON.generate(datafile), symbolize_names: true)
+                          else
+                            datafile
+                          end
+        unless parsed_datafile.is_a?(Hash) && parsed_datafile[:schemaVersion].is_a?(String) &&
+               parsed_datafile[:revision].is_a?(String) && parsed_datafile[:segments].is_a?(Hash) &&
+               parsed_datafile[:features].is_a?(Hash)
+          raise ArgumentError, "Invalid datafile"
+        end
         next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile_reader.get_datafile, parsed_datafile)
         new_datafile_reader = DatafileReader.new(
           datafile: next_datafile,
@@ -572,7 +583,7 @@ module Featurevisor
     def report_diagnostic(diagnostic, source_module = nil)
       diagnostic = (diagnostic || {}).dup
       diagnostic[:level] ||= "info"
-      diagnostic[:module] ||= source_module.name if source_module && source_module.name
+      diagnostic[:module] = source_module.name if source_module && source_module.name
       details = (diagnostic[:details] || {}).dup
       legacy_module_name = diagnostic.delete(:module_name)
       legacy_original_error = diagnostic.delete(:original_error)

@@ -114,6 +114,9 @@ RSpec.describe FeaturevisorCLI::Commands::Benchmark do
     it "accepts valid parameters" do
       # Mock the build_datafile method to avoid external command execution
       allow_any_instance_of(FeaturevisorCLI::Commands::Benchmark).to receive(:build_datafile).and_return({
+        "schemaVersion" => "2",
+        "revision" => "test",
+        "segments" => {},
         "features" => {
           "testFeature" => {
             "key" => "testFeature",

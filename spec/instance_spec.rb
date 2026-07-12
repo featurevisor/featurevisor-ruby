@@ -1403,6 +1403,13 @@ RSpec.describe "sdk: instance" do
     expect(events.map { |event| event[:replaced] }).to eq([false, true])
   end
 
+  it "accepts a datafile hash with string keys" do
+    sdk = Featurevisor.create_featurevisor
+    sdk.set_datafile({ "schemaVersion" => "2", "revision" => "string-keys", "segments" => {}, "features" => {} })
+
+    expect(sdk.get_revision).to eq("string-keys")
+  end
+
   it "should run module setup and close lifecycle callbacks" do
     setup_revision = nil
     closed = false

@@ -75,8 +75,8 @@ RSpec.describe Featurevisor::Events do
 
       expect(result).to eq({
         revision: "2",
-        previous_revision: "1",
-        revision_changed: true,
+        previousRevision: "1",
+        revisionChanged: true,
         features: %i[feature1 feature2],
         replaced: false
       })
@@ -103,8 +103,8 @@ RSpec.describe Featurevisor::Events do
 
       expect(result).to eq({
         revision: "2",
-        previous_revision: "1",
-        revision_changed: true,
+        previousRevision: "1",
+        revisionChanged: true,
         features: %i[feature2 feature3],
         replaced: false
       })
@@ -129,8 +129,8 @@ RSpec.describe Featurevisor::Events do
 
       expect(result).to eq({
         revision: "2",
-        previous_revision: "1",
-        revision_changed: true,
+        previousRevision: "1",
+        revisionChanged: true,
         features: %i[feature1 feature2],
         replaced: false
       })

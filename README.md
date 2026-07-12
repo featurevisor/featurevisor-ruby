@@ -507,8 +507,8 @@ You can listen to these events that can occur at various stages in your applicat
 ```ruby
 unsubscribe = f.on('datafile_set') do |event|
   revision = event[:revision]        # new revision
-  previous_revision = event[:previous_revision]
-  revision_changed = event[:revision_changed] # true if revision has changed
+  previous_revision = event[:previousRevision]
+  revision_changed = event[:revisionChanged] # true if revision has changed
 
   # list of feature keys that have new updates,
   # and you should re-evaluate them

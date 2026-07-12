@@ -67,8 +67,8 @@ module Featurevisor
 
       {
         revision: new_revision,
-        previous_revision: previous_revision,
-        revision_changed: previous_revision != new_revision,
+        previousRevision: previous_revision,
+        revisionChanged: previous_revision != new_revision,
         features: all_affected_features,
         replaced: replace
       }
