@@ -11,7 +11,7 @@ test:
 
 test-example-1:
 	bundle exec rspec spec/
-	bundle exec ruby bin/featurevisor test --projectDirectoryPath=/Users/fahad/Projects/featurevisor/featurevisor/examples/example-1 --onlyFailures
+	bundle exec ruby bin/featurevisor test --projectDirectoryPath=../featurevisor/examples/example-1 --onlyFailures
 
 setup-monorepo:
 	mkdir -p monorepo
