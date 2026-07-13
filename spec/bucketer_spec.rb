@@ -38,7 +38,7 @@ RSpec.describe Featurevisor::Bucketer do
   end
 
   describe "get_bucket_key" do
-    let(:logger) { Featurevisor.create_logger(level: "warn") }
+    let(:logger) { Featurevisor.const_get(:Logger).new(level: "warn") }
 
     it "should be a method" do
       expect(Featurevisor::Bucketer).to respond_to(:get_bucket_key)

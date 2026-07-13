@@ -1,7 +1,7 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor::Events do
-  let(:logger) { Featurevisor.create_logger(level: "error") }
+  let(:logger) { Featurevisor.const_get(:Logger).new(level: "error") }
 
   describe ".get_params_for_sticky_set_event" do
     it "should get params for sticky set event: empty to new" do
@@ -50,7 +50,7 @@ RSpec.describe Featurevisor::Events do
 
   describe ".get_params_for_datafile_set_event" do
     def build_reader(revision:, features:)
-      Featurevisor::DatafileReader.new(
+      Featurevisor.const_get(:DatafileReader).new(
         datafile: {
           schemaVersion: "1.0.0",
           revision: revision,
@@ -75,9 +75,10 @@ RSpec.describe Featurevisor::Events do
 
       expect(result).to eq({
         revision: "2",
-        previous_revision: "1",
-        revision_changed: true,
-        features: %i[feature1 feature2]
+        previousRevision: "1",
+        revisionChanged: true,
+        features: %i[feature1 feature2],
+        replaced: false
       })
     end
 
@@ -102,9 +103,10 @@ RSpec.describe Featurevisor::Events do
 
       expect(result).to eq({
         revision: "2",
-        previous_revision: "1",
-        revision_changed: true,
-        features: %i[feature2 feature3]
+        previousRevision: "1",
+        revisionChanged: true,
+        features: %i[feature2 feature3],
+        replaced: false
       })
     end
 
@@ -127,9 +129,10 @@ RSpec.describe Featurevisor::Events do
 
       expect(result).to eq({
         revision: "2",
-        previous_revision: "1",
-        revision_changed: true,
-        features: %i[feature1 feature2]
+        previousRevision: "1",
+        revisionChanged: true,
+        features: %i[feature1 feature2],
+        replaced: false
       })
     end
   end

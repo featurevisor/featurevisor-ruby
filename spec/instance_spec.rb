@@ -2,11 +2,13 @@ require "featurevisor"
 
 RSpec.describe "sdk: instance" do
   it "should be a function" do
-    expect(Featurevisor.respond_to?(:create_instance)).to be true
+    expect(Featurevisor.respond_to?(:create_featurevisor)).to be true
+    expect(Featurevisor.respond_to?(:create_instance)).to be false
+    expect(Featurevisor.respond_to?(:create_logger)).to be false
   end
 
   it "should create instance with datafile content" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -16,12 +18,29 @@ RSpec.describe "sdk: instance" do
     )
 
     expect(sdk.respond_to?(:get_variation)).to be true
+    expect(sdk.get_schema_version).to eq("2")
+    expect(sdk.get_feature_keys).to eq([])
+  end
+
+  it "reports lifecycle mutation diagnostics" do
+    diagnostics = []
+    sdk = Featurevisor.create_featurevisor(
+      log_level: "debug",
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic }
+    )
+
+    sdk.set_datafile(schemaVersion: "2", revision: "1", segments: {}, features: {})
+    sdk.set_sticky(test: { enabled: true })
+    sdk.set_context(country: "nl")
+
+    codes = diagnostics.map { |diagnostic| diagnostic[:code] }
+    expect(codes).to include("datafile_set", "sticky_set", "context_set")
   end
 
   it "should configure plain bucketBy" do
     captured_bucket_key = ""
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -45,7 +64,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_key: ->(options) {
@@ -69,7 +88,7 @@ RSpec.describe "sdk: instance" do
   it "should configure and bucketBy" do
     captured_bucket_key = ""
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -93,7 +112,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_key: ->(options) {
@@ -117,7 +136,7 @@ RSpec.describe "sdk: instance" do
   it "should configure or bucketBy" do
     captured_bucket_key = ""
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -141,7 +160,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           bucket_key: ->(options) {
@@ -175,12 +194,12 @@ RSpec.describe "sdk: instance" do
     expect(captured_bucket_key).to eq("456.test")
   end
 
-  it "should intercept context: before hook" do
+  it "should intercept context: before module" do
     intercepted = false
     intercepted_feature_key = ""
     intercepted_variable_key = ""
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -204,7 +223,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           before: ->(options) {
@@ -231,12 +250,12 @@ RSpec.describe "sdk: instance" do
     expect(intercepted_variable_key).to be_nil
   end
 
-  it "should intercept value: after hook" do
+  it "should intercept value: after module" do
     intercepted = false
     intercepted_feature_key = ""
     intercepted_variable_key = ""
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -260,7 +279,7 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      hooks: [
+      modules: [
         {
           name: "unit-test",
           after: ->(evaluation, options) {
@@ -313,7 +332,7 @@ RSpec.describe "sdk: instance" do
       segments: {}
     }
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       sticky: {
         test: {
           enabled: true,
@@ -357,7 +376,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should honour simple required features" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -396,7 +415,7 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("myKey")).to be false
 
     # enabling required should enable the feature too
-    sdk2 = Featurevisor.create_instance(
+    sdk2 = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -435,7 +454,7 @@ RSpec.describe "sdk: instance" do
 
   it "should honour required features with variation" do
     # should be disabled because required has different variation
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -482,7 +501,7 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("myKey")).to be false
 
     # child should be enabled because required has desired variation
-    sdk2 = Featurevisor.create_instance(
+    sdk2 = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -531,7 +550,7 @@ RSpec.describe "sdk: instance" do
   it "should emit warnings for deprecated feature" do
     deprecated_count = 0
 
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -572,13 +591,11 @@ RSpec.describe "sdk: instance" do
         },
         segments: {}
       },
-      logger: Featurevisor.create_logger(
-        handler: ->(level, message, details) {
-          if level == "warn" && message.include?("is deprecated")
+      on_diagnostic: ->(diagnostic) {
+          if diagnostic[:code] == "deprecated_feature"
             deprecated_count += 1
           end
         }
-      )
     )
 
     test_variation = sdk.get_variation("test", {
@@ -594,7 +611,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should check if enabled for overridden flags from rules" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -641,8 +658,8 @@ RSpec.describe "sdk: instance" do
   it "should check if enabled for mutually exclusive features" do
     bucket_value = 10_000
 
-    sdk = Featurevisor.create_instance(
-      hooks: [
+    sdk = Featurevisor.create_featurevisor(
+      modules: [
         {
           name: "unit-test",
           bucket_value: ->(options) {
@@ -676,7 +693,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should get variation" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -755,7 +772,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should get variable" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -1065,7 +1082,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should get variables without any variations" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -1135,7 +1152,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should check if enabled for individually named segments" do
-    sdk = Featurevisor.create_instance(
+    sdk = Featurevisor.create_featurevisor(
       datafile: {
         schemaVersion: "2",
         revision: "1.0",
@@ -1226,7 +1243,7 @@ RSpec.describe "sdk: instance" do
       "segments": {}
     }'
 
-    sdk = Featurevisor.create_instance(datafile: json_datafile)
+    sdk = Featurevisor.create_featurevisor(datafile: json_datafile)
 
     expect(sdk.get_revision).to eq("1.0")
     expect(sdk.get_feature("test")).to be_a(Hash)
@@ -1237,7 +1254,7 @@ RSpec.describe "sdk: instance" do
   end
 
   it "should handle JSON string when setting datafile" do
-    sdk = Featurevisor.create_instance
+    sdk = Featurevisor.create_featurevisor
 
     json_datafile = '{
       "schemaVersion": "2",
@@ -1291,7 +1308,7 @@ RSpec.describe "sdk: instance" do
 
     # Parse with symbolize_names: true as documented
     datafile = JSON.parse(json_string, symbolize_names: true)
-    sdk = Featurevisor.create_instance(datafile: datafile)
+    sdk = Featurevisor.create_featurevisor(datafile: datafile)
 
     expect(sdk.get_revision).to eq("3.0")
     expect(sdk.get_feature("manualTest")).to be_a(Hash)
@@ -1299,9 +1316,248 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("manualTest", { userId: "123" })).to be true
   end
 
+  it "should merge datafiles by default and preserve featurevisorVersion" do
+    sdk = Featurevisor.create_featurevisor(
+      datafile: {
+        schemaVersion: "2",
+        revision: "1.0",
+        featurevisorVersion: "3.0.0",
+        segments: {},
+        features: {
+          firstFeature: {
+            key: "firstFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      }
+    )
+
+    sdk.set_datafile(
+      {
+        schemaVersion: "2",
+        revision: "2.0",
+        featurevisorVersion: "3.1.0",
+        segments: {},
+        features: {
+          secondFeature: {
+            key: "secondFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      }
+    )
+
+    expect(sdk.get_revision).to eq("2.0")
+    reader = sdk.instance_variable_get(:@datafile_reader)
+    expect(reader.featurevisor_version).to eq("3.1.0")
+    expect(sdk.get_feature("firstFeature")).to be_a(Hash)
+    expect(sdk.get_feature("secondFeature")).to be_a(Hash)
+  end
+
+  it "should replace datafile when replace is true" do
+    sdk = Featurevisor.create_featurevisor(
+      datafile: {
+        schemaVersion: "2",
+        revision: "1.0",
+        segments: {},
+        features: {
+          firstFeature: {
+            key: "firstFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      }
+    )
+
+    sdk.set_datafile(
+      {
+        schemaVersion: "2",
+        revision: "2.0",
+        segments: {},
+        features: {
+          secondFeature: {
+            key: "secondFeature",
+            bucketBy: "userId",
+            traffic: [{ key: "1", segments: "*", percentage: 100_000, allocation: [] }]
+          }
+        }
+      },
+      true
+    )
+
+    expect(sdk.get_feature("firstFeature")).to be_nil
+    expect(sdk.get_feature("secondFeature")).to be_a(Hash)
+  end
+
+  it "should include replaced flag in datafile_set events" do
+    events = []
+    sdk = Featurevisor.create_featurevisor
+    sdk.on("datafile_set", ->(event) { events << event })
+
+    sdk.set_datafile({ schemaVersion: "2", revision: "1.0", segments: {}, features: {} })
+    sdk.set_datafile({ schemaVersion: "2", revision: "2.0", segments: {}, features: {} }, true)
+
+    expect(events.map { |event| event[:replaced] }).to eq([false, true])
+  end
+
+  it "accepts a datafile hash with string keys" do
+    sdk = Featurevisor.create_featurevisor
+    sdk.set_datafile({ "schemaVersion" => "2", "revision" => "string-keys", "segments" => {}, "features" => {} })
+
+    expect(sdk.get_revision).to eq("string-keys")
+  end
+
+  it "should run module setup and close lifecycle callbacks" do
+    setup_revision = nil
+    closed = false
+
+    sdk = Featurevisor.create_featurevisor(
+      modules: [
+        {
+          name: "lifecycle",
+          setup: ->(api) { setup_revision = api[:get_revision].call },
+          close: -> { closed = true }
+        }
+      ]
+    )
+
+    expect(setup_revision).to eq("unknown")
+
+    sdk.close
+
+    expect(closed).to be true
+  end
+
+  it "should report duplicate module diagnostics and emit error events" do
+    diagnostics = []
+    errors = []
+    sdk = Featurevisor.create_featurevisor(
+      log_level: "error",
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic },
+      modules: [{ name: "duplicate" }]
+    )
+    sdk.on("error", ->(event) { errors << event })
+
+    result = sdk.add_module(name: "duplicate")
+
+    expect(result).to be_nil
+    expect(diagnostics.last).to include(
+      level: "error",
+      code: "duplicate_module",
+      moduleName: "duplicate",
+      details: {}
+    )
+    expect(errors.last).to include(diagnostic: include(code: "duplicate_module"))
+  end
+
+  it "should report module close errors and keep closing remaining modules" do
+    diagnostics = []
+    errors = []
+    closed = []
+
+    sdk = Featurevisor.create_featurevisor(
+      log_level: "error",
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic },
+      modules: [
+        {
+          name: "first",
+          close: -> {
+            closed << "first"
+            raise "first close failed"
+          }
+        },
+        {
+          name: "second",
+          close: -> { closed << "second" }
+        }
+      ]
+    )
+    sdk.on("error", ->(event) { errors << event })
+
+    sdk.close
+
+    expect(closed).to eq(%w[first second])
+    expect(diagnostics).to include(
+      include(
+        level: "error",
+        code: "module_close_error",
+        moduleName: "first",
+        originalError: be_a(RuntimeError),
+        details: {}
+      )
+    )
+    expect(errors).to include(include(diagnostic: include(code: "module_close_error", moduleName: "first")))
+  end
+
+  it "should report module close errors from unsubscribe once" do
+    diagnostics = []
+
+    sdk = Featurevisor.create_featurevisor(
+      log_level: "error",
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic }
+    )
+
+    unsubscribe = sdk.add_module(
+      name: "dynamic",
+      close: -> { raise "dynamic close failed" }
+    )
+    unsubscribe.call
+    unsubscribe.call
+
+    expect(diagnostics.count { |diagnostic| diagnostic[:code] == "module_close_error" && diagnostic[:moduleName] == "dynamic" }).to eq(1)
+  end
+
+  it "should support module diagnostic subscribe and report behavior" do
+    module_api = nil
+    received_by_instance = []
+    received_by_module = []
+
+    sdk = Featurevisor.create_featurevisor(
+      on_diagnostic: ->(diagnostic) { received_by_instance << diagnostic },
+      modules: [
+        {
+          name: "listener",
+          setup: ->(api) {
+            api[:on_diagnostic].call(->(diagnostic) { received_by_module << diagnostic })
+          }
+        },
+        {
+          name: "reporter",
+          setup: ->(api) { module_api = api }
+        }
+      ]
+    )
+
+    module_api[:report_diagnostic].call(level: "warn", code: "module_warning", message: "module warning")
+
+    expect(received_by_instance.last).to include(code: "module_warning", module: "reporter")
+    expect(received_by_module.last).to include(code: "module_warning", module: "reporter")
+
+    sdk.remove_module("listener")
+    module_api[:report_diagnostic].call(level: "warn", code: "after_remove", message: "after remove")
+
+    expect(received_by_instance.last).to include(code: "after_remove", module: "reporter")
+    expect(received_by_module.last).to include(code: "module_warning", module: "reporter")
+  end
+
+  it "should isolate diagnostic handler failures" do
+    sdk = nil
+
+    expect {
+      sdk = Featurevisor.create_featurevisor(
+        on_diagnostic: ->(_diagnostic) { raise "handler failed" }
+      )
+      sdk.is_enabled("missing", {})
+      sdk.close
+    }.not_to raise_error
+  end
+
   describe "get_value_by_type" do
     let(:sdk) do
-      Featurevisor.create_instance(
+      Featurevisor.create_featurevisor(
         datafile: {
           schemaVersion: "2",
           revision: "1.0",
@@ -1319,10 +1575,10 @@ RSpec.describe "sdk: instance" do
       expect(sdk.send(:get_value_by_type, "1", "string")).to eq("1")
     end
 
-    it "returns boolean coercion result for boolean type" do
+    it "returns booleans only for boolean type" do
       expect(sdk.send(:get_value_by_type, true, "boolean")).to be true
       expect(sdk.send(:get_value_by_type, false, "boolean")).to be false
-      expect(sdk.send(:get_value_by_type, "true", "boolean")).to be false
+      expect(sdk.send(:get_value_by_type, "true", "boolean")).to be_nil
     end
 
     it "returns object value for object type" do
@@ -1338,12 +1594,14 @@ RSpec.describe "sdk: instance" do
       expect(sdk.send(:get_value_by_type, %w[1 2 3], "array")).to eq(%w[1 2 3])
     end
 
-    it "parses integer for integer type" do
-      expect(sdk.send(:get_value_by_type, "1", "integer")).to eq(1)
+    it "returns integers only for integer type" do
+      expect(sdk.send(:get_value_by_type, 1, "integer")).to eq(1)
+      expect(sdk.send(:get_value_by_type, "1", "integer")).to be_nil
     end
 
-    it "parses double for double type" do
-      expect(sdk.send(:get_value_by_type, "1.1", "double")).to eq(1.1)
+    it "returns finite numbers only for double type" do
+      expect(sdk.send(:get_value_by_type, 1.1, "double")).to eq(1.1)
+      expect(sdk.send(:get_value_by_type, "1.1", "double")).to be_nil
     end
 
     it "returns nil when value is nil" do

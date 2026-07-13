@@ -15,6 +15,7 @@ Gem::Specification.new do |spec|
   spec.executables   = ["featurevisor"]
   spec.require_paths = ["lib"]
 
+  spec.add_dependency "benchmark", ">= 0"
   spec.add_development_dependency "rspec", "~> 3.12"
   spec.add_development_dependency "rake", "~> 13.0"
 end

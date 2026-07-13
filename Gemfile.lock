@@ -1,11 +1,13 @@
 PATH
   remote: .
   specs:
-    featurevisor (0.3.0)
+    featurevisor (1.0.0)
+      benchmark
 
 GEM
   remote: https://rubygems.org/
   specs:
+    benchmark (0.4.0)
     diff-lcs (1.6.2)
     rake (13.3.0)
     rspec (3.13.1)

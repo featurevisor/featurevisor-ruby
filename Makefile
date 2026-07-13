@@ -1,4 +1,4 @@
-.PHONY: install build test setup-monorepo update-monorepo
+.PHONY: install build test test-example-1 setup-monorepo update-monorepo
 
 install:
 	bundle install
@@ -8,6 +8,10 @@ build:
 
 test:
 	bundle exec rspec spec/
+
+test-example-1:
+	bundle exec rspec spec/
+	bundle exec ruby bin/featurevisor test --projectDirectoryPath=../featurevisor/examples/example-1 --onlyFailures
 
 setup-monorepo:
 	mkdir -p monorepo

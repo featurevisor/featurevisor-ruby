@@ -29,12 +29,20 @@ module FeaturevisorCLI
           exit 1
         end
 
-        puts ""
-        puts "Assessing distribution for feature: \"#{@options.feature}\"..."
-        puts ""
-
-        # Parse context if provided
         context = parse_context
+
+        targets = resolve_targets
+        (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+      end
+
+      private
+
+      def run_for_target(context, target)
+        puts "\nAssess Featurevisor distribution"
+        puts "  Feature: #{@options.feature}"
+        puts "  Environment: #{@options.environment}"
+        puts "  Target: #{target}" if target
+        puts "  Iterations: #{@options.n}"
 
         # Print context information
         if @options.context
@@ -47,10 +55,10 @@ module FeaturevisorCLI
         puts ""
 
         # Build datafile
-        datafile = build_datafile(@options.environment)
+        datafile = build_datafile(@options.environment, target)
 
         # Create SDK instance
-        instance = create_instance(datafile)
+        instance = create_featurevisor(datafile)
 
         # Check if feature has variations
         feature = instance.get_feature(@options.feature)
@@ -104,7 +112,21 @@ module FeaturevisorCLI
         end
       end
 
-      private
+      def resolve_targets
+        return [] if @options.targets.empty?
+        stdout, stderr, status = Open3.capture3("npx", "featurevisor", "list", "--targets", "--json", chdir: @project_path)
+        unless status.success?
+          puts stderr
+          exit 1
+        end
+        available = JSON.parse(stdout).map { |item| item.is_a?(Hash) ? (item["key"] || item["name"]) : item }
+        unknown = @options.targets.find { |target| !available.include?(target) }
+        if unknown
+          puts "Unknown target \"#{unknown}\". Available targets: #{available.empty? ? "none" : available.join(", ")}."
+          exit 1
+        end
+        @options.targets
+      end
 
       def parse_context
         if @options.context
@@ -121,15 +143,12 @@ module FeaturevisorCLI
         end
       end
 
-      def build_datafile(environment)
+      def build_datafile(environment, target = nil)
         puts "Building datafile for environment: #{environment}..."
 
         # Build the command similar to Go implementation
         command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
-
-        if @options.schema_version
-          command_parts << "--schemaVersion=#{@options.schema_version}"
-        end
+        command_parts << "--target=#{target}" if target
 
         if @options.inflate
           command_parts << "--inflate=#{@options.inflate}"
@@ -159,9 +178,9 @@ module FeaturevisorCLI
         [stdout, stderr, exit_status.exitstatus]
       end
 
-      def create_instance(datafile)
+      def create_featurevisor(datafile)
         # Create SDK instance
-        Featurevisor.create_instance(
+        Featurevisor.create_featurevisor(
           datafile: datafile,
           log_level: get_logger_level
         )

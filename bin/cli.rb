@@ -7,12 +7,13 @@ module FeaturevisorCLI
     attr_accessor :command, :assertion_pattern, :context, :environment, :feature,
                  :key_pattern, :n, :only_failures, :quiet, :variable, :variation,
                  :verbose, :inflate, :show_datafile, :schema_version, :project_directory_path,
-                 :populate_uuid, :with_scopes, :with_tags
+                 :populate_uuid, :with_scopes, :with_tags, :targets
 
     def initialize
       @n = 1000
       @project_directory_path = Dir.pwd
       @populate_uuid = []
+      @targets = []
     end
   end
 
@@ -82,15 +83,15 @@ module FeaturevisorCLI
           options.show_datafile = true
         end
 
-        opts.on("--schemaVersion=VERSION", "Schema version") do |v|
+        opts.on("--schemaVersion=VERSION", "--schema-version=VERSION", "Legacy schema version option accepted and ignored") do |v|
           options.schema_version = v
         end
 
-        opts.on("--with-scopes", "--withScopes", "Test scoped assertions against scoped datafiles") do
+        opts.on("--with-scopes", "--withScopes", "Legacy scope option accepted and ignored") do
           options.with_scopes = true
         end
 
-        opts.on("--with-tags", "--withTags", "Test tagged assertions against tagged datafiles") do
+        opts.on("--with-tags", "--withTags", "Legacy tag option accepted and ignored") do
           options.with_tags = true
         end
 
@@ -100,6 +101,10 @@ module FeaturevisorCLI
 
         opts.on("--populateUuid=KEY", "Populate UUID for attribute key") do |v|
           options.populate_uuid << v
+        end
+
+        opts.on("--target=TARGET", "Target datafile; repeat for multiple targets") do |v|
+          options.targets << v unless options.targets.include?(v)
         end
 
         opts.on("-h", "--help", "Show this help message") do

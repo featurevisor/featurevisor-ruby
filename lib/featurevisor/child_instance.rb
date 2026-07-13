@@ -3,8 +3,6 @@
 module Featurevisor
   # Child instance class for managing child contexts and sticky features
   class ChildInstance
-    attr_reader :parent, :context, :sticky, :emitter
-
     # Initialize a new child instance
     # @param options [Hash] Child instance options
     # @option options [Instance] :parent Parent instance
@@ -94,8 +92,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -113,8 +111,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -134,8 +132,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -155,8 +153,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -176,8 +174,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -197,8 +195,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -218,8 +216,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -239,8 +237,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -260,8 +258,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -281,8 +279,8 @@ module Featurevisor
           **context
         },
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end
@@ -300,8 +298,8 @@ module Featurevisor
         },
         feature_keys,
         {
-          sticky: @sticky,
-          **options
+          **options,
+          __featurevisor_child_sticky: @sticky
         }
       )
     end

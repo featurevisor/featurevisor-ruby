@@ -1,12 +1,13 @@
 # Featurevisor Ruby SDK <!-- omit in toc -->
 
-This is a port of Featurevisor [JavaScript SDK](https://featurevisor.com/docs/sdks/javascript/) v2.x to Ruby, providing a way to evaluate feature flags, variations, and variables in your Ruby applications.
+This is a port of Featurevisor [JavaScript SDK](https://featurevisor.com/docs/sdks/javascript/) v3.x to Ruby, providing a way to evaluate feature flags, variations, and variables in your Ruby applications.
 
-This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 projects and above.
+This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 
 ## Table of contents <!-- omit in toc -->
 
 - [Installation](#installation)
+- [Public API](#public-api)
 - [Initialization](#initialization)
 - [Evaluation types](#evaluation-types)
 - [Context](#context)
@@ -23,20 +24,23 @@ This SDK is compatible with [Featurevisor](https://featurevisor.com/) v2.0 proje
   - [Initialize with sticky](#initialize-with-sticky)
   - [Set sticky afterwards](#set-sticky-afterwards)
 - [Setting datafile](#setting-datafile)
+  - [Merging by default](#merging-by-default)
+  - [Replacing](#replacing)
+  - [Loading datafiles on demand](#loading-datafiles-on-demand)
   - [Updating datafile](#updating-datafile)
   - [Interval-based update](#interval-based-update)
-- [Logging](#logging)
+- [Evaluation details](#evaluation-details)
+- [Diagnostics](#diagnostics)
   - [Levels](#levels)
-  - [Customizing levels](#customizing-levels)
   - [Handler](#handler)
 - [Events](#events)
   - [`datafile_set`](#datafile_set)
   - [`context_set`](#context_set)
   - [`sticky_set`](#sticky_set)
-- [Evaluation details](#evaluation-details)
-- [Hooks](#hooks)
-  - [Defining a hook](#defining-a-hook)
-  - [Registering hooks](#registering-hooks)
+  - [`error`](#error)
+- [Modules](#modules)
+  - [Defining a module](#defining-a-module)
+  - [Registering modules](#registering-modules)
 - [Child instance](#child-instance)
 - [Close](#close)
 - [CLI usage](#cli-usage)
@@ -72,6 +76,18 @@ Or install it yourself as:
 $ gem install featurevisor
 ```
 
+## Public API
+
+The main runtime API is `Featurevisor.create_featurevisor`:
+
+```ruby
+f = Featurevisor.create_featurevisor(
+  datafile: datafile_content
+)
+```
+
+Most applications only need this factory and the returned `Featurevisor::Instance`. Public extension and observability APIs include modules, diagnostics, events, and the datafile structures accepted by the factory.
+
 ## Initialization
 
 The SDK can be initialized by passing [datafile](https://featurevisor.com/docs/building-datafiles/) content directly:
@@ -89,7 +105,7 @@ response = Net::HTTP.get_response(URI(datafile_url))
 datafile_content = JSON.parse(response.body, symbolize_names: true)
 
 # Create SDK instance
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   datafile: datafile_content
 )
 ```
@@ -101,10 +117,10 @@ Alternatively, you can pass a JSON string directly and the SDK will parse it aut
 ```ruby
 # Option 1: Parse JSON yourself (recommended)
 datafile_content = JSON.parse(json_string, symbolize_names: true)
-f = Featurevisor.create_instance(datafile: datafile_content)
+f = Featurevisor.create_featurevisor(datafile: datafile_content)
 
 # Option 2: Pass JSON string directly (automatic parsing)
-f = Featurevisor.create_instance(datafile: json_string)
+f = Featurevisor.create_featurevisor(datafile: json_string)
 ```
 
 ## Evaluation types
@@ -142,7 +158,7 @@ You can set context at the time of initialization:
 ```ruby
 require 'featurevisor'
 
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   context: {
     deviceId: '123',
     country: 'nl'
@@ -274,6 +290,8 @@ f.get_variable_object(feature_key, variable_key, context = {})
 f.get_variable_json(feature_key, variable_key, context = {})
 ```
 
+Type specific methods do not coerce values. `get_variable_integer` returns `nil` for the string `"1"`, and boolean getters return `nil` for non-boolean values.
+
 ## Getting all evaluations
 
 You can get evaluations of all features available in the SDK instance:
@@ -304,12 +322,14 @@ This is handy especially when you want to pass all evaluations from a backend ap
 
 For the lifecycle of the SDK instance in your application, you can set some features with sticky values, meaning that they will not be evaluated against the fetched [datafile](https://featurevisor.com/docs/building-datafiles/):
 
+Sticky values belong to an SDK or child instance. Evaluation options do not accept sticky overrides; use `spawn(context, sticky: ...)` when a child needs its own sticky state.
+
 ### Initialize with sticky
 
 ```ruby
 require 'featurevisor'
 
-f = Featurevisor.create_instance(
+f = Featurevisor.create_featurevisor(
   sticky: {
     myFeatureKey: {
       enabled: true,
@@ -362,6 +382,49 @@ f.set_datafile(json_string)
 
 **Important**: When calling `set_datafile()`, ensure JSON is parsed with `symbolize_names: true` if you're parsing it yourself.
 
+### Merging by default
+
+By default, `set_datafile(datafile)` merges the incoming datafile into the SDK's current datafile:
+
+- top-level metadata such as `schemaVersion`, `revision`, and `featurevisorVersion` comes from the incoming datafile
+- `segments` are merged, with incoming entries overriding existing ones
+- `features` are merged, with incoming entries overriding existing ones
+
+This means you can call `set_datafile` more than once with different datafiles, and the SDK instance accumulates their features and segments together.
+
+### Replacing
+
+To fully replace the stored datafile, pass `true` as the second argument:
+
+```ruby
+f.set_datafile(datafile_content, true)
+```
+
+### Loading datafiles on demand
+
+Because merging is the default, a single SDK instance can start with a small datafile and load more datafiles later as your application needs them, instead of downloading every feature upfront.
+
+This pairs well with [targets](https://featurevisor.com/docs/targets/), where each target produces a smaller datafile for a specific part of your application:
+
+```ruby
+require "open-uri"
+
+f = Featurevisor.create_featurevisor({})
+
+def load_datafile(f, target)
+  url = "https://cdn.yoursite.com/production/featurevisor-#{target}.json"
+  datafile = JSON.parse(URI.open(url).read, symbolize_names: true)
+
+  # merges into whatever was loaded before
+  f.set_datafile(datafile)
+end
+
+load_datafile(f, "products")
+
+# later, when the user reaches checkout
+load_datafile(f, "checkout")
+```
+
 ### Updating datafile
 
 You can set the datafile as many times as you want in your application, which will result in emitting a [`datafile_set`](#datafile_set) event that you can listen and react to accordingly.
@@ -400,65 +463,38 @@ end
 Thread.new { update_datafile(f, datafile_url) }
 ```
 
-## Logging
+## Diagnostics
 
-By default, Featurevisor SDKs will print out logs to the console for `info` level and above.
+By default, Featurevisor reports diagnostics to the console for `info` level and above with a `[Featurevisor]` prefix.
 
 ### Levels
 
-These are all the available log levels:
+Available diagnostic levels are `fatal`, `error`, `warn`, `info`, and `debug`.
 
-- `error`
-- `warn`
-- `info`
-- `debug`
-
-### Customizing levels
-
-If you choose `debug` level to make the logs more verbose, you can set it at the time of SDK initialization.
-
-Setting `debug` level will print out all logs, including `info`, `warn`, and `error` levels.
+Set the level during initialization or update it afterwards:
 
 ```ruby
-require 'featurevisor'
-
-f = Featurevisor.create_instance(
-  logger: Featurevisor.create_logger(level: 'debug')
-)
-```
-
-Alternatively, you can also set `log_level` directly:
-
-```ruby
-f = Featurevisor.create_instance(
-  log_level: 'debug'
-)
-```
-
-You can also set log level from SDK instance afterwards:
-
-```ruby
-f.set_log_level('debug')
+f = Featurevisor.create_featurevisor(log_level: "debug")
+f.set_log_level("info")
 ```
 
 ### Handler
 
-You can also pass your own log handler, if you do not wish to print the logs to the console:
+Use `on_diagnostic` to send structured diagnostics to your observability system:
 
 ```ruby
-require 'featurevisor'
-
-f = Featurevisor.create_instance(
-  logger: Featurevisor.create_logger(
-    level: 'info',
-    handler: ->(level, message, details) {
-      # do something with the log
-    }
-  )
+f = Featurevisor.create_featurevisor(
+  log_level: "info",
+  on_diagnostic: ->(diagnostic) {
+    puts "#{diagnostic[:level]} #{diagnostic[:code]} #{diagnostic[:message]}"
+  }
 )
 ```
 
-Further log levels like `info` and `debug` will help you understand how the feature variations and variables are evaluated in the runtime against given context.
+Every diagnostic has `:level`, `:code`, `:message`, and an object-shaped `:details` hash. Optional `:module`, `:moduleName`, and `:originalError` fields describe provenance. Evaluation metadata belongs in `:details`.
+
+Diagnostic handlers are isolated from SDK behavior. An exception in a handler does not stop other handlers or evaluations.
+
 
 ## Events
 
@@ -471,8 +507,8 @@ You can listen to these events that can occur at various stages in your applicat
 ```ruby
 unsubscribe = f.on('datafile_set') do |event|
   revision = event[:revision]        # new revision
-  previous_revision = event[:previous_revision]
-  revision_changed = event[:revision_changed] # true if revision has changed
+  previous_revision = event[:previousRevision]
+  revision_changed = event[:revisionChanged] # true if revision has changed
 
   # list of feature keys that have new updates,
   # and you should re-evaluate them
@@ -492,6 +528,8 @@ The `features` array will contain keys of features that have either been:
 - removed
 
 compared to the previous datafile content that existed in the SDK instance.
+
+The event also includes `replaced`, which is `true` when the datafile replaced the previous content instead of merging into it.
 
 ### `context_set`
 
@@ -514,6 +552,20 @@ unsubscribe = f.on('sticky_set') do |event|
   puts 'Sticky features set'
 end
 ```
+
+### `error`
+
+```ruby
+unsubscribe = f.on('error') do |event|
+  diagnostic = event[:diagnostic]
+  code = diagnostic[:code]
+  message = diagnostic[:message]
+
+  puts "Featurevisor error: #{code} #{message}"
+end
+```
+
+The `error` event is emitted for diagnostics reported with `level: "error"`.
 
 ## Evaluation details
 
@@ -547,22 +599,33 @@ And optionally these properties depending on whether you are evaluating a featur
 - `variable_value`: the variable value
 - `variable_schema`: the variable schema
 
-## Hooks
+## Modules
 
-Hooks allow you to intercept the evaluation process and customize it further as per your needs.
+Modules allow you to intercept the evaluation process and customize SDK behavior.
 
-### Defining a hook
+### Defining a module
 
-A hook is a simple hash with a unique required `name` and optional functions:
+A module is a simple hash with a unique recommended `name` and optional lifecycle functions:
+
+If `setup` raises an exception, the module is not registered. Featurevisor removes subscriptions created during setup, reports `module_setup_error`, and calls `close` when present.
 
 ```ruby
 require 'featurevisor'
 
-my_custom_hook = {
-  # only required property
-  name: 'my-custom-hook',
+my_custom_module = {
+  # recommended, and used for duplicate detection/removal
+  name: 'my-custom-module',
 
-  # rest of the properties below are all optional per hook
+  # rest of the properties below are all optional per module
+
+  # setup once, when the module is registered
+  setup: ->(api) {
+    revision = api[:get_revision].call
+
+    api[:on_diagnostic].call(->(diagnostic) {
+      puts diagnostic[:message]
+    })
+  },
 
   # before evaluation
   before: ->(options) {
@@ -592,26 +655,43 @@ my_custom_hook = {
   bucket_value: ->(options) {
     # return custom bucket value
     options[:bucket_value]
+  },
+
+  # cleanup when module is removed or SDK is closed
+  close: -> {
+    # cleanup here
   }
 }
 ```
 
-### Registering hooks
+The module API passed to `setup` exposes:
 
-You can register hooks at the time of SDK initialization:
+- `get_revision`
+- `on_diagnostic`
+- `report_diagnostic`
+
+### Registering modules
+
+You can register modules at the time of SDK initialization:
 
 ```ruby
 require 'featurevisor'
 
-f = Featurevisor.create_instance(
-  hooks: [my_custom_hook]
+f = Featurevisor.create_featurevisor(
+  modules: [my_custom_module]
 )
 ```
 
 Or after initialization:
 
 ```ruby
-f.add_hook(my_custom_hook)
+remove_module = f.add_module(my_custom_module)
+
+# remove later by calling the returned function
+remove_module.call
+
+# or remove by name
+f.remove_module('my-custom-module')
 ```
 
 ## Child instance
@@ -687,29 +767,24 @@ $ bundle exec featurevisor test \
   --quiet|--verbose \
   --onlyFailures \
   --keyPattern="myFeatureKey" \
-  --assertionPattern="#1" \
-  --with-scopes \
-  --with-tags
+  --assertionPattern="#1"
 ```
 
-`--with-scopes` and `--with-tags` make the Ruby test runner build scoped/tagged datafiles in memory (via `npx featurevisor build --json`) and evaluate matching assertions against those exact datafiles.
+The Ruby test runner builds base datafiles and Target datafiles in memory via `npx featurevisor build --json`. When an assertion contains `target`, it is evaluated against the matching Target datafile.
 
-If an assertion references `scope` and `--with-scopes` is not provided, the runner still evaluates the assertion by merging that scope's configured context into the assertion context (without building scoped datafiles).
-
-For compatibility, camelCase aliases are also supported: `--withScopes` and `--withTags`.
+All three commands accept repeatable `--target=<target>` options. `test` builds only the selected Target datafiles and runs untargeted assertions plus assertions for those targets. `benchmark` and `assess-distribution` run independently against every selected Target datafile. Without `--target`, existing project-wide behavior is preserved. Project definitions, test specs, Target discovery, and datafile generation continue to come from the Node.js CLI.
 
 ### Test against local monorepo's example-1
 
 ```bash
 $ cd /absolute/path/to/featurevisor-ruby
-$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1
-$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-scopes
-$ bundle exec featurevisor test --projectDirectoryPath=./monorepo/examples/example-1 --with-tags
+$ bundle exec ruby bin/featurevisor test --projectDirectoryPath=/Users/fahad/Projects/featurevisor/featurevisor/examples/example-1 --onlyFailures
+$ make test-example-1
 ```
 
 ### Benchmark
 
-Learn more about benchmarking [here](https://featurevisor.com/docs/cmd/#benchmarking).
+Learn more about benchmarking [here](https://featurevisor.com/docs/cli/#benchmarking).
 
 ```bash
 $ bundle exec featurevisor benchmark \
@@ -722,7 +797,7 @@ $ bundle exec featurevisor benchmark \
 
 ### Assess distribution
 
-Learn more about assessing distribution [here](https://featurevisor.com/docs/cmd/#assess-distribution).
+Learn more about assessing distribution [here](https://featurevisor.com/docs/cli/#assess-distribution).
 
 ```bash
 $ bundle exec featurevisor assess-distribution \

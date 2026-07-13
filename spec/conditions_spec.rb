@@ -1,9 +1,9 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor::Conditions do
-  let(:logger) { Featurevisor.create_logger }
+  let(:logger) { Featurevisor.const_get(:Logger).new }
   let(:datafile_reader) do
-    Featurevisor::DatafileReader.new(
+    Featurevisor.const_get(:DatafileReader).new(
       datafile: {
         schemaVersion: "2.0",
         revision: "1",
@@ -426,6 +426,25 @@ RSpec.describe Featurevisor::Conditions do
           browser_version: "1.0"
         })
       ).to be false
+    end
+
+    it "should treat empty NOT as false and nested OR under NOT as none-match" do
+      none_of_chrome_or_firefox = [
+        {
+          not: [
+            {
+              or: [
+                { attribute: "browser_type", operator: "equals", value: "chrome" },
+                { attribute: "browser_type", operator: "equals", value: "firefox" }
+              ]
+            }
+          ]
+        }
+      ]
+
+      expect(datafile_reader.all_conditions_are_matched(none_of_chrome_or_firefox, { browser_type: "chrome" })).to be false
+      expect(datafile_reader.all_conditions_are_matched(none_of_chrome_or_firefox, { browser_type: "edge" })).to be true
+      expect(datafile_reader.all_conditions_are_matched([{ not: [] }], {})).to be false
     end
 
     it "should match with OR inside AND" do

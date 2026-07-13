@@ -2,7 +2,7 @@
 
 module Featurevisor
   # Event names for the emitter
-  EVENT_NAMES = %w[datafile_set context_set sticky_set].freeze
+  EVENT_NAMES = %w[datafile_set context_set sticky_set error].freeze
 
   # Event emitter class for handling event subscriptions and triggers
   class Emitter
@@ -42,7 +42,7 @@ module Featurevisor
 
       return unless listeners
 
-      listeners.each do |listener|
+      listeners.dup.each do |listener|
         begin
           listener.call(details)
         rescue => err

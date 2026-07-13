@@ -38,6 +38,11 @@ RSpec.describe FeaturevisorCLI do
 end
 
 RSpec.describe FeaturevisorCLI::Parser do
+  it "parses and deduplicates repeated targets" do
+    options = described_class.parse(["test", "--target=web", "--target=mobile", "--target=web"])
+    expect(options.targets).to eq(["web", "mobile"])
+  end
+
   describe ".parse" do
     it "parses basic options" do
       options = FeaturevisorCLI::Parser.parse(["test", "--verbose", "--n=5000", "--with-scopes", "--with-tags"])
@@ -48,10 +53,18 @@ RSpec.describe FeaturevisorCLI::Parser do
       expect(options.with_tags).to be true
     end
 
-    it "parses camelCase aliases for scope/tag flags" do
+    it "parses legacy compatibility flags" do
       options = FeaturevisorCLI::Parser.parse(["test", "--withScopes", "--withTags"])
       expect(options.with_scopes).to be true
       expect(options.with_tags).to be true
+    end
+
+    it "accepts legacy schema version aliases" do
+      kebab_options = FeaturevisorCLI::Parser.parse(["test", "--schema-version=2"])
+      camel_options = FeaturevisorCLI::Parser.parse(["test", "--schemaVersion=2"])
+
+      expect(kebab_options.schema_version).to eq("2")
+      expect(camel_options.schema_version).to eq("2")
     end
 
     it "sets default values" do
@@ -101,6 +114,9 @@ RSpec.describe FeaturevisorCLI::Commands::Benchmark do
     it "accepts valid parameters" do
       # Mock the build_datafile method to avoid external command execution
       allow_any_instance_of(FeaturevisorCLI::Commands::Benchmark).to receive(:build_datafile).and_return({
+        "schemaVersion" => "2",
+        "revision" => "test",
+        "segments" => {},
         "features" => {
           "testFeature" => {
             "key" => "testFeature",

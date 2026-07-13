@@ -27,29 +27,32 @@ module FeaturevisorCLI
           exit 1
         end
 
-        puts ""
-        puts "Running benchmark for feature \"#{@options.feature}\"..."
-        puts ""
-
-        # Parse context if provided
         context = parse_context
+        targets = resolve_targets
+        (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+      end
 
-        puts "Building datafile containing all features for \"#{@options.environment}\"..."
+      private
+
+      def run_for_target(context, target)
         datafile_build_start = Time.now
-
-        # Build datafile by executing the featurevisor build command
-        datafile = build_datafile(@options.environment)
+        datafile = build_datafile(@options.environment, target)
         datafile_build_duration = Time.now - datafile_build_start
         datafile_build_duration_ms = (datafile_build_duration * 1000).round
 
-        puts "Datafile build duration: #{datafile_build_duration_ms}ms"
+        puts "\nBenchmark Featurevisor feature"
+        puts "  Feature: #{@options.feature}"
+        puts "  Environment: #{@options.environment}"
+        puts "  Target: #{target}" if target
+        puts "  Iterations: #{@options.n}"
+        puts "  Build duration: #{datafile_build_duration_ms}ms"
 
         # Calculate datafile size
         datafile_size = datafile.to_json.bytesize
         puts "Datafile size: #{(datafile_size / 1024.0).round(2)} kB"
 
         # Create SDK instance with the datafile
-        instance = create_instance(datafile)
+        instance = create_featurevisor(datafile)
         puts "...SDK initialized"
 
         puts ""
@@ -73,10 +76,26 @@ module FeaturevisorCLI
         value_output = format_value(output[:value])
         puts "Evaluated value : #{value_output}"
         puts "Total duration  : #{pretty_duration(output[:duration])}"
-        puts "Average duration: #{pretty_duration(output[:duration] / @options.n)}"
+        puts "Minimum duration: #{format_duration_ms(output[:min_duration])}"
+        puts "Average duration: #{format_duration_ms(output[:average_duration])}"
+        puts "Maximum duration: #{format_duration_ms(output[:max_duration])}"
       end
 
-      private
+      def resolve_targets
+        return [] if @options.targets.empty?
+        stdout, stderr, status = Open3.capture3("npx", "featurevisor", "list", "--targets", "--json", chdir: @project_path)
+        unless status.success?
+          puts stderr
+          exit 1
+        end
+        available = JSON.parse(stdout).map { |target| target.is_a?(Hash) ? (target["key"] || target["name"]) : target }
+        unknown = @options.targets.find { |target| !available.include?(target) }
+        if unknown
+          puts "Unknown target \"#{unknown}\". Available targets: #{available.empty? ? "none" : available.join(", ")}."
+          exit 1
+        end
+        @options.targets
+      end
 
       def parse_context
         if @options.context
@@ -93,24 +112,15 @@ module FeaturevisorCLI
         end
       end
 
-      def build_datafile(environment)
+      def build_datafile(environment, target = nil)
         puts "Building datafile for environment: #{environment}..."
 
-        # Build the command similar to Go implementation
         command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
-
-        # Add schema version if specified
-        if @options.schema_version && !@options.schema_version.empty?
-          command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--schemaVersion=#{@options.schema_version}", "--json"]
-        end
+        command_parts << "--target=#{target}" if target
 
         # Add inflate if specified
         if @options.inflate && @options.inflate > 0
-          if @options.schema_version && !@options.schema_version.empty?
-            command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--schemaVersion=#{@options.schema_version}", "--inflate=#{@options.inflate}", "--json"]
-          else
-            command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--inflate=#{@options.inflate}", "--json"]
-          end
+          command_parts << "--inflate=#{@options.inflate}"
         end
 
         command = command_parts.join(" ")
@@ -142,9 +152,9 @@ module FeaturevisorCLI
         stdout
       end
 
-      def create_instance(datafile)
+      def create_featurevisor(datafile)
         # Create a real Featurevisor instance
-        instance = Featurevisor.create_instance(
+        instance = Featurevisor.create_featurevisor(
           log_level: get_logger_level
         )
 
@@ -164,61 +174,53 @@ module FeaturevisorCLI
         end
       end
 
-      def benchmark_feature_flag(instance, feature_key, context, n)
-        start_time = Time.now
+      def benchmark_evaluation(n)
+        value = nil
+        total_duration_ns = 0
+        min_duration_ns = nil
+        max_duration_ns = 0
 
-        # Get the actual feature value from the SDK
-        value = instance.is_enabled(feature_key, context)
-
-        # Benchmark the evaluation
         n.times do
-          instance.is_enabled(feature_key, context)
+          start_time = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond)
+          value = yield
+          duration_ns = Process.clock_gettime(Process::CLOCK_MONOTONIC, :nanosecond) - start_time
+
+          total_duration_ns += duration_ns
+          min_duration_ns = duration_ns if min_duration_ns.nil? || duration_ns < min_duration_ns
+          max_duration_ns = duration_ns if duration_ns > max_duration_ns
         end
 
-        duration = Time.now - start_time
+        duration = total_duration_ns / 1_000_000_000.0
 
         {
           value: value,
-          duration: duration
+          duration: duration,
+          min_duration: (min_duration_ns || 0) / 1_000_000_000.0,
+          average_duration: duration / n,
+          max_duration: max_duration_ns / 1_000_000_000.0
         }
+      end
+
+      def format_duration_ms(duration)
+        format("%.6fms", duration * 1000)
+      end
+
+      def benchmark_feature_flag(instance, feature_key, context, n)
+        benchmark_evaluation(n) do
+          instance.is_enabled(feature_key, context)
+        end
       end
 
       def benchmark_feature_variation(instance, feature_key, context, n)
-        start_time = Time.now
-
-        # Get the actual feature variation from the SDK
-        value = instance.get_variation(feature_key, context)
-
-        # Benchmark the evaluation
-        n.times do
+        benchmark_evaluation(n) do
           instance.get_variation(feature_key, context)
         end
-
-        duration = Time.now - start_time
-
-        {
-          value: value,
-          duration: duration
-        }
       end
 
       def benchmark_feature_variable(instance, feature_key, variable_key, context, n)
-        start_time = Time.now
-
-        # Get the actual variable value from the SDK
-        value = instance.get_variable(feature_key, variable_key, context)
-
-        # Benchmark the evaluation
-        n.times do
+        benchmark_evaluation(n) do
           instance.get_variable(feature_key, variable_key, context)
         end
-
-        duration = Time.now - start_time
-
-        {
-          value: value,
-          duration: duration
-        }
       end
 
       def format_value(value)

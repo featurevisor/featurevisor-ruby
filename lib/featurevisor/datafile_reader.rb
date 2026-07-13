@@ -5,7 +5,7 @@ require "json"
 module Featurevisor
   # DatafileReader class for reading and processing Featurevisor datafiles
   class DatafileReader
-    attr_reader :schema_version, :revision, :segments, :features, :logger, :regex_cache
+    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :logger, :regex_cache
 
     # Initialize a new DatafileReader
     # @param options [Hash] Options hash containing datafile and logger
@@ -17,6 +17,7 @@ module Featurevisor
 
       @schema_version = datafile[:schemaVersion]
       @revision = datafile[:revision]
+      @featurevisor_version = datafile[:featurevisorVersion]
       @segments = (datafile[:segments] || {}).transform_keys(&:to_sym)
       @features = (datafile[:features] || {}).transform_keys(&:to_sym)
 
@@ -63,6 +64,16 @@ module Featurevisor
     # @return [String] Schema version string
     def get_schema_version
       @schema_version
+    end
+
+    def get_datafile
+      {
+        schemaVersion: @schema_version,
+        revision: @revision,
+        featurevisorVersion: @featurevisor_version,
+        segments: @segments,
+        features: @features
+      }.compact
     end
 
     # Get a segment by key
@@ -172,15 +183,11 @@ module Featurevisor
       end
 
       if conditions.is_a?(Hash) && conditions[:not] && conditions[:not].is_a?(Array)
-        return conditions[:not].all? do
-          all_conditions_are_matched({ and: conditions[:not] }, context) == false
-        end
+        return !all_conditions_are_matched({ and: conditions[:not] }, context)
       end
 
       if conditions.is_a?(Hash) && conditions["not"] && conditions["not"].is_a?(Array)
-        return conditions["not"].all? do
-          all_conditions_are_matched({ "and" => conditions["not"] }, context) == false
-        end
+        return !all_conditions_are_matched({ "and" => conditions["not"] }, context)
       end
 
 
@@ -237,15 +244,11 @@ module Featurevisor
         end
 
         if group_segments[:not] && group_segments[:not].is_a?(Array)
-          return group_segments[:not].all? do
-            all_segments_are_matched({ and: group_segments[:not] }, context) == false
-          end
+          return !all_segments_are_matched({ and: group_segments[:not] }, context)
         end
 
         if group_segments["not"] && group_segments["not"].is_a?(Array)
-          return group_segments["not"].all? do
-            all_segments_are_matched({ "and" => group_segments["not"] }, context) == false
-          end
+          return !all_segments_are_matched({ "and" => group_segments["not"] }, context)
         end
 
 
@@ -351,4 +354,6 @@ module Featurevisor
       segments
     end
   end
+
+  private_constant :DatafileReader
 end

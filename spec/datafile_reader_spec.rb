@@ -1,18 +1,18 @@
 require "featurevisor"
 
-RSpec.describe Featurevisor::DatafileReader do
-  let(:logger) { Featurevisor.create_logger }
+RSpec.describe Featurevisor.const_get(:DatafileReader) do
+  let(:logger) { Featurevisor.const_get(:Logger).new }
 
   describe "basic functionality" do
     it "should be a class" do
-      expect(Featurevisor::DatafileReader).to be_a(Class)
+      expect(Featurevisor.const_get(:DatafileReader)).to be_a(Class)
     end
 
     it "should create an instance with options" do
       datafile = { schemaVersion: "2", revision: "1", segments: {}, features: {} }
-      reader = Featurevisor::DatafileReader.new(datafile: datafile, logger: logger)
+      reader = Featurevisor.const_get(:DatafileReader).new(datafile: datafile, logger: logger)
 
-      expect(reader).to be_instance_of(Featurevisor::DatafileReader)
+      expect(reader).to be_instance_of(Featurevisor.const_get(:DatafileReader))
     end
   end
 
@@ -72,7 +72,7 @@ RSpec.describe Featurevisor::DatafileReader do
       }
     end
 
-    let(:reader) { Featurevisor::DatafileReader.new(datafile: datafile_json, logger: logger) }
+    let(:reader) { Featurevisor.const_get(:DatafileReader).new(datafile: datafile_json, logger: logger) }
 
     it "should return requested entities" do
       expect(reader.get_revision).to eq("1")
@@ -255,7 +255,7 @@ RSpec.describe Featurevisor::DatafileReader do
       }
     end
 
-    let(:datafile_reader) { Featurevisor::DatafileReader.new(datafile: datafile_content, logger: logger) }
+    let(:datafile_reader) { Featurevisor.const_get(:DatafileReader).new(datafile: datafile_content, logger: logger) }
 
     it "should match everyone" do
       group = groups.find { |g| g[:key] == "*" }
@@ -416,11 +416,32 @@ RSpec.describe Featurevisor::DatafileReader do
       expect(datafile_reader.all_segments_are_matched(group[:segments], { version: "5.5" })).to be false
       expect(datafile_reader.all_segments_are_matched(group[:segments], { version: 5.5 })).to be false
     end
+
+    it "should treat NOT segment children as an implicit AND" do
+      segments = { not: ["mobileUsers", "netherlands"] }
+
+      expect(datafile_reader.all_segments_are_matched(segments, {
+        country: "nl",
+        deviceType: "mobile"
+      })).to be false
+      expect(datafile_reader.all_segments_are_matched(segments, {
+        country: "nl",
+        deviceType: "desktop"
+      })).to be true
+    end
+
+    it "should treat empty NOT segments as false and nested OR as none-match" do
+      segments = { not: [{ or: ["mobileUsers", "desktopUsers"] }] }
+
+      expect(datafile_reader.all_segments_are_matched(segments, { deviceType: "mobile" })).to be false
+      expect(datafile_reader.all_segments_are_matched(segments, { deviceType: "tv" })).to be true
+      expect(datafile_reader.all_segments_are_matched({ not: [] }, {})).to be false
+    end
   end
 
   describe "conditions" do
     let(:datafile_reader) do
-      Featurevisor::DatafileReader.new(
+      Featurevisor.const_get(:DatafileReader).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
@@ -649,7 +670,7 @@ RSpec.describe Featurevisor::DatafileReader do
 
   describe "utility methods" do
     let(:datafile_reader) do
-      Featurevisor::DatafileReader.new(
+      Featurevisor.const_get(:DatafileReader).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
