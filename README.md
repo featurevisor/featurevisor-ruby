@@ -43,6 +43,7 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
   - [Registering modules](#registering-modules)
 - [Child instance](#child-instance)
 - [Close](#close)
+- [OpenFeature](#openfeature)
 - [CLI usage](#cli-usage)
   - [Test](#test)
   - [Test against local monorepo's example-1](#test-against-local-monorepos-example-1)
@@ -810,6 +811,49 @@ $ bundle exec featurevisor assess-distribution \
   --populateUuid=deviceId \
   --n=1000
 ```
+
+## OpenFeature
+
+Install the official OpenFeature SDK next to Featurevisor:
+
+```ruby
+gem "featurevisor"
+gem "openfeature-sdk", "~> 0.6.5"
+```
+
+```ruby
+require "featurevisor/openfeature_provider"
+
+provider = Featurevisor::OpenFeatureProvider.new(
+  datafile: datafile_content,
+)
+
+OpenFeature::SDK.configure do |config|
+  config.set_provider_and_wait(provider)
+end
+
+client = OpenFeature::SDK.build_client
+enabled = client.fetch_boolean_value(
+  flag_key: "checkout",
+  default_value: false,
+  evaluation_context: OpenFeature::SDK::EvaluationContext.new(targeting_key: "user-123"),
+)
+```
+
+Use `checkout` for a flag, `checkout:variation` for its variation, and `checkout:title` for its `title` variable. Boolean variables use the boolean resolver. Arrays, hashes, and JSON variables use the object resolver.
+
+OpenFeature's targeting key maps to `userId` by default. `targeting_key_field`, `key_separator`, and `variation_key` can customize the mapping.
+
+You can also reuse an existing Featurevisor instance:
+
+```ruby
+featurevisor = Featurevisor.create_featurevisor(datafile: datafile_content)
+provider = Featurevisor::OpenFeatureProvider.new(featurevisor: featurevisor)
+```
+
+The caller owns an instance passed this way. Provider shutdown does not close it. Call `featurevisor.close` when every consumer is finished with it. When the provider creates the instance from options, the provider owns and closes it. If both are supplied, `featurevisor` takes precedence over the options hash.
+
+See the [OpenFeature provider guide](https://featurevisor.com/docs/sdks/openfeature/) for resolution reasons, errors, metadata, tracking, lifecycle, and providers for other languages.
 
 <!-- FEATUREVISOR_DOCS_END -->
 

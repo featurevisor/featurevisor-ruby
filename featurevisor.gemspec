@@ -18,4 +18,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency "benchmark", ">= 0"
   spec.add_development_dependency "rspec", "~> 3.12"
   spec.add_development_dependency "rake", "~> 13.0"
+  spec.add_development_dependency "openfeature-sdk", "~> 0.6.5"
 end
