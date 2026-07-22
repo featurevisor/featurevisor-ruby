@@ -3,50 +3,75 @@ name: Checks
 on:
   push:
     branches:
-      - "**"
+      - main
   pull_request:
-    types:
-      - opened
-      - synchronize # when a PR is updated
-      - reopened # when a PR is reopened
-      - ready_for_review # when a PR is ready for review
-      - review_requested # when a PR is requested for review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ci:
+  base-sdk:
+    name: Base SDK on Ruby ${{ matrix.ruby-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby-version: ["3.0", "3.4"]
+    env:
+      BUNDLE_GEMFILE: gemfiles/base.gemfile
 
     steps:
-      - name: Check out
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v6
 
-      - name: Set up Ruby ${{ matrix.ruby-version }}
+      - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
+          ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
 
-      - name: Install
-        run: |
-          make install
+      - name: Test base SDK without OpenFeature dependencies
+        run: bundle exec rspec spec/ --exclude-pattern spec/openfeature_provider_spec.rb
 
-      - name: Build
-        run: |
-          make build
+  full:
+    name: Full SDK and provider
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
-      - name: Test
-        run: |
-          make test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
         with:
-          node-version-file: ".nvmrc"
+          ruby-version: "3.4"
+          bundler-cache: true
 
-      - name: Setup Featurevisor example-1 project
+      - name: Test both packages
+        run: make test
+
+      - name: Build and verify both gem artifacts
+        run: make build
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Set up Featurevisor example-1 project
         run: |
           mkdir example-1
-          (cd example-1 && npx @featurevisor/cli@2.x init --example=1)
-          (cd example-1 && npm install)
-          (cd example-1 && npx featurevisor test)
+          cd example-1
+          npx --yes @featurevisor/cli@3 init --example=1
+          npm install
+          npx featurevisor build
+          npx featurevisor test --onlyFailures
 
       - name: Run Featurevisor project tests against Ruby SDK
-        run: ./bin/featurevisor test --projectDirectoryPath=./example-1
+        run: bundle exec ruby bin/featurevisor test --projectDirectoryPath=example-1 --onlyFailures

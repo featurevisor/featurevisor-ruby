@@ -10,13 +10,22 @@ Gem::Specification.new do |spec|
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 3.0.0"
 
-  spec.files         = Dir.glob("lib/**/*") + Dir.glob("bin/**/*") + %w[README.md LICENSE]
+  spec.metadata = {
+    "source_code_uri" => "https://github.com/featurevisor/featurevisor-ruby",
+    "documentation_uri" => "https://featurevisor.com/docs/sdks/ruby/",
+    "bug_tracker_uri" => "https://github.com/featurevisor/featurevisor-ruby/issues",
+    "allowed_push_host" => "https://rubygems.org",
+    "rubygems_mfa_required" => "true"
+  }
+
+  spec.files         = (Dir.glob("lib/**/*") + Dir.glob("bin/**/*") + %w[README.md LICENSE]).reject do |file|
+    file == "lib/featurevisor/openfeature_provider.rb" || file == "lib/featurevisor-openfeature.rb"
+  end
   spec.bindir        = "bin"
   spec.executables   = ["featurevisor"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "benchmark", ">= 0"
+  spec.add_dependency "benchmark", ">= 0", "< 1"
   spec.add_development_dependency "rspec", "~> 3.12"
   spec.add_development_dependency "rake", "~> 13.0"
-  spec.add_development_dependency "openfeature-sdk", "~> 0.6.5"
 end

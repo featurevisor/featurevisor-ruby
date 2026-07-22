@@ -5,32 +5,51 @@ on:
     tags:
       - "v*.*.*"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
-      - name: Check out
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v6
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
+          ruby-version: "3.4"
           bundler-cache: true
 
-      - name: Configure RubyGems credentials
+      - name: Test both packages
+        run: make test
+
+      - name: Build and verify both gem artifacts
+        run: make build
+
+      - name: Verify tag matches package version
+        id: version
+        shell: bash
         run: |
-          mkdir -p ~/.gem
-          echo ":rubygems_api_key: $RUBYGEMS_API_KEY" > ~/.gem/credentials
-          chmod 0600 ~/.gem/credentials
+          version="$(bundle exec ruby -Ilib -rfeaturevisor/version -e 'print Featurevisor::VERSION')"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match gem version $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Featurevisor SDK
         env:
-          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: gem push "featurevisor-${{ steps.version.outputs.version }}.gem"
 
-      - name: Build
-        run: |
-          make build
-          ls -l *.gem
-
-      - name: Push to RubyGems
-        run: |
-          gem push *.gem
+      - name: Publish Featurevisor OpenFeature provider
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: gem push "featurevisor-openfeature-${{ steps.version.outputs.version }}.gem"

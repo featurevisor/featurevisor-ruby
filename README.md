@@ -779,7 +779,7 @@ All three commands accept repeatable `--target=<target>` options. `test` builds 
 
 ```bash
 $ cd /absolute/path/to/featurevisor-ruby
-$ bundle exec ruby bin/featurevisor test --projectDirectoryPath=/Users/fahad/Projects/featurevisor/featurevisor/examples/example-1 --onlyFailures
+$ bundle exec ruby bin/featurevisor test --projectDirectoryPath=../featurevisor/examples/example-1 --onlyFailures
 $ make test-example-1
 ```
 
@@ -814,12 +814,17 @@ $ bundle exec featurevisor assess-distribution \
 
 ## OpenFeature
 
-Install the official OpenFeature SDK next to Featurevisor:
+The OpenFeature provider is published as a separate gem. This keeps OpenFeature code and dependencies out of applications that only use the Featurevisor SDK.
+
+The provider currently requires Ruby 3.4 or newer because that is the minimum version supported by the official OpenFeature Ruby SDK.
+
+Install the provider:
 
 ```ruby
-gem "featurevisor"
-gem "openfeature-sdk", "~> 0.6.5"
+gem "featurevisor-openfeature", "~> 1.1"
 ```
+
+It installs the matching `featurevisor` gem and the official `openfeature-sdk` dependency. The provider and base SDK deliberately share the same version, and the provider requires that exact Featurevisor version.
 
 ```ruby
 require "featurevisor/openfeature_provider"
@@ -844,6 +849,17 @@ Use `checkout` for a flag, `checkout:variation` for its variation, and `checkout
 
 OpenFeature's targeting key maps to `userId` by default. `targeting_key_field`, `key_separator`, and `variation_key` can customize the mapping.
 
+You can pass any Featurevisor initialization options directly to the provider. These options are used to create the Featurevisor instance owned by the provider:
+
+```ruby
+provider = Featurevisor::OpenFeatureProvider.new(
+  datafile: datafile_content,
+  targeting_key_field: "accountId",
+  key_separator: "/",
+  variation_key: "$variation",
+)
+```
+
 You can also reuse an existing Featurevisor instance:
 
 ```ruby
@@ -861,24 +877,35 @@ See the [OpenFeature provider guide](https://featurevisor.com/docs/sdks/openfeat
 
 ### Setting up
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+After checking out the repository, run `make install` to install dependencies.
 
 ### Running tests
 
 ```bash
 $ bundle exec rspec
+$ make test-base
+$ make test-example-1
 ```
 
-To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and tags, and push the `.gem` file to [rubygems.org](https://rubygems.org).
+Build and verify both gems with:
+
+```bash
+$ make build
+```
+
+The build produces `featurevisor-VERSION.gem` and `featurevisor-openfeature-VERSION.gem`. The artifact verifier confirms that OpenFeature code and dependencies are absent from the base gem and present only in the provider gem.
 
 ### Releasing
 
-- Update version in `lib/featurevisor/version.rb`
+- Update the shared version in `lib/featurevisor/version.rb`
 - Run `bundle install`
 - Push commit to `main` branch
 - Wait for CI to complete
-- Tag the release with the version number
-- This will trigger a new release to [RubyGems](https://rubygems.org/gems/featurevisor)
+- Tag the release with the same version number, for example `v1.1.0`
+- The workflow verifies that the tag matches the shared version
+- The workflow publishes `featurevisor` first, followed by `featurevisor-openfeature`
+
+The gems are separate RubyGems packages built from the same repository. Publishing the base gem first ensures the provider's exact Featurevisor dependency is available when the provider is published. If the second push fails, rerun or retry the provider publication without republishing the existing base version.
 
 ## License
 
