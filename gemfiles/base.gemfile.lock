@@ -1,5 +1,5 @@
 PATH
-  remote: .
+  remote: ..
   specs:
     featurevisor (1.1.0)
       benchmark (>= 0, < 1)
@@ -7,23 +7,22 @@ PATH
 GEM
   remote: https://rubygems.org/
   specs:
-    benchmark (0.4.0)
+    benchmark (0.5.0)
     diff-lcs (1.6.2)
-    openfeature-sdk (0.6.5)
-    rake (13.3.0)
-    rspec (3.13.1)
+    rake (13.4.2)
+    rspec (3.13.2)
       rspec-core (~> 3.13.0)
       rspec-expectations (~> 3.13.0)
       rspec-mocks (~> 3.13.0)
-    rspec-core (3.13.5)
+    rspec-core (3.13.6)
       rspec-support (~> 3.13.0)
     rspec-expectations (3.13.5)
       diff-lcs (>= 1.2.0, < 2.0)
       rspec-support (~> 3.13.0)
-    rspec-mocks (3.13.5)
+    rspec-mocks (3.13.8)
       diff-lcs (>= 1.2.0, < 2.0)
       rspec-support (~> 3.13.0)
-    rspec-support (3.13.5)
+    rspec-support (3.13.7)
 
 PLATFORMS
   arm64-darwin-24
@@ -31,9 +30,8 @@ PLATFORMS
 
 DEPENDENCIES
   featurevisor!
-  openfeature-sdk (~> 0.6.5)
   rake (~> 13.0)
   rspec (~> 3.12)
 
 BUNDLED WITH
-   2.6.9
+   2.4.22

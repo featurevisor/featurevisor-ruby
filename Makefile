@@ -1,13 +1,19 @@
-.PHONY: install build test test-example-1 setup-monorepo update-monorepo
+.PHONY: install build verify-artifacts test test-base test-example-1 setup-monorepo update-monorepo
 
 install:
 	bundle install
 
 build:
-	gem build featurevisor.gemspec
+	bundle exec rake build
+
+verify-artifacts:
+	bundle exec ruby scripts/verify_gems.rb
 
 test:
 	bundle exec rspec spec/
+
+test-base:
+	BUNDLE_GEMFILE=gemfiles/base.gemfile bundle exec rspec spec/ --exclude-pattern spec/openfeature_provider_spec.rb
 
 test-example-1:
 	bundle exec rspec spec/
