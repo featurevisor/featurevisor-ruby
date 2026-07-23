@@ -21,8 +21,8 @@ module Featurevisor
     end
 
     # Get parameters for datafile set event
-    # @param previous_reader [DatafileReader] Previous datafile reader
-    # @param new_reader [DatafileReader] New datafile reader
+    # @param previous_reader [InstanceEvaluationDataProvider] Previous datafile
+    # @param new_reader [InstanceEvaluationDataProvider] New datafile
     # @return [Hash] Event parameters
     def self.get_params_for_datafile_set_event(previous_reader, new_reader, replace = false)
       previous_revision = previous_reader.get_revision

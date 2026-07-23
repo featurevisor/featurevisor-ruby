@@ -1,18 +1,18 @@
 require "featurevisor"
 
-RSpec.describe Featurevisor.const_get(:DatafileReader) do
-  let(:logger) { Featurevisor.const_get(:Logger).new }
+RSpec.describe Featurevisor.const_get(:InstanceEvaluationDataProvider) do
+  let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new }
 
   describe "basic functionality" do
     it "should be a class" do
-      expect(Featurevisor.const_get(:DatafileReader)).to be_a(Class)
+      expect(Featurevisor.const_get(:InstanceEvaluationDataProvider)).to be_a(Class)
     end
 
     it "should create an instance with options" do
       datafile = { schemaVersion: "2", revision: "1", segments: {}, features: {} }
-      reader = Featurevisor.const_get(:DatafileReader).new(datafile: datafile, logger: logger)
+      reader = Featurevisor.const_get(:InstanceEvaluationDataProvider).new(datafile: datafile, diagnostics: diagnostics)
 
-      expect(reader).to be_instance_of(Featurevisor.const_get(:DatafileReader))
+      expect(reader).to be_instance_of(Featurevisor.const_get(:InstanceEvaluationDataProvider))
     end
   end
 
@@ -72,7 +72,7 @@ RSpec.describe Featurevisor.const_get(:DatafileReader) do
       }
     end
 
-    let(:reader) { Featurevisor.const_get(:DatafileReader).new(datafile: datafile_json, logger: logger) }
+    let(:reader) { Featurevisor.const_get(:InstanceEvaluationDataProvider).new(datafile: datafile_json, diagnostics: diagnostics) }
 
     it "should return requested entities" do
       expect(reader.get_revision).to eq("1")
@@ -255,7 +255,7 @@ RSpec.describe Featurevisor.const_get(:DatafileReader) do
       }
     end
 
-    let(:datafile_reader) { Featurevisor.const_get(:DatafileReader).new(datafile: datafile_content, logger: logger) }
+    let(:datafile_reader) { Featurevisor.const_get(:InstanceEvaluationDataProvider).new(datafile: datafile_content, diagnostics: diagnostics) }
 
     it "should match everyone" do
       group = groups.find { |g| g[:key] == "*" }
@@ -441,14 +441,14 @@ RSpec.describe Featurevisor.const_get(:DatafileReader) do
 
   describe "conditions" do
     let(:datafile_reader) do
-      Featurevisor.const_get(:DatafileReader).new(
+      Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
           segments: {},
           features: {}
         },
-        logger: logger
+        diagnostics: diagnostics
       )
     end
 
@@ -670,14 +670,14 @@ RSpec.describe Featurevisor.const_get(:DatafileReader) do
 
   describe "utility methods" do
     let(:datafile_reader) do
-      Featurevisor.const_get(:DatafileReader).new(
+      Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
           segments: {},
           features: {}
         },
-        logger: logger
+        diagnostics: diagnostics
       )
     end
 

@@ -1350,7 +1350,7 @@ RSpec.describe "sdk: instance" do
     )
 
     expect(sdk.get_revision).to eq("2.0")
-    reader = sdk.instance_variable_get(:@datafile_reader)
+    reader = sdk.instance_variable_get(:@datafile)
     expect(reader.featurevisor_version).to eq("3.1.0")
     expect(sdk.get_feature("firstFeature")).to be_a(Hash)
     expect(sdk.get_feature("secondFeature")).to be_a(Hash)
@@ -1541,6 +1541,69 @@ RSpec.describe "sdk: instance" do
 
     expect(received_by_instance.last).to include(code: "after_remove", module: "reporter")
     expect(received_by_module.last).to include(code: "module_warning", module: "reporter")
+  end
+
+  it "keeps module diagnostic levels independent from the instance level" do
+    received = []
+    instance = Featurevisor.create_featurevisor(
+      log_level: "fatal",
+      modules: [
+        {
+          name: "observer",
+          setup: lambda do |api|
+            api[:on_diagnostic].call(
+              ->(diagnostic) { received << diagnostic },
+              log_level: "debug"
+            )
+          end
+        }
+      ]
+    )
+
+    instance.is_enabled("missing")
+
+    diagnostic = received.find { |item| item[:code] == "feature_not_found" }
+    expect(diagnostic).not_to be_nil
+    expect(diagnostic[:details]).to include(
+      featureKey: "missing",
+      reason: "feature_not_found"
+    )
+    expect(diagnostic[:details][:evaluation]).to include(
+      featureKey: "missing",
+      reason: "feature_not_found"
+    )
+  end
+
+  it "normalizes condition match diagnostics without nesting details" do
+    diagnostics = []
+    instance = Featurevisor.create_featurevisor(
+      log_level: "debug",
+      on_diagnostic: ->(diagnostic) { diagnostics << diagnostic }
+    )
+    error = ArgumentError.new("invalid semver")
+
+    instance.send(
+      :handle_evaluation_diagnostic,
+      "warn",
+      "invalid semver",
+      {
+        code: "condition_match_error",
+        error: error,
+        details: {
+          condition: { attribute: "version" },
+          context: { version: "invalid" }
+        }
+      }
+    )
+
+    diagnostic = diagnostics.last
+    expect(diagnostic[:code]).to eq("condition_match_error")
+    expect(diagnostic[:originalError]).to equal(error)
+    expect(diagnostic[:details]).to include(
+      condition: { attribute: "version" },
+      context: { version: "invalid" }
+    )
+    expect(diagnostic[:details]).not_to have_key(:details)
   end
 
   it "should isolate diagnostic handler failures" do

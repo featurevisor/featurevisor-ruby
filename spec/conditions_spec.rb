@@ -1,16 +1,16 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor::Conditions do
-  let(:logger) { Featurevisor.const_get(:Logger).new }
+  let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new }
   let(:datafile_reader) do
-    Featurevisor.const_get(:DatafileReader).new(
+    Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
       datafile: {
         schemaVersion: "2.0",
         revision: "1",
         segments: {},
         features: {}
       },
-      logger: logger
+      diagnostics: diagnostics
     )
   end
 
@@ -53,6 +53,44 @@ RSpec.describe Featurevisor::Conditions do
 
   describe "condition operators" do
     let(:get_regex) { ->(pattern, flags) { Regexp.new(pattern, flags) } }
+
+    it "keeps JavaScript primitive equality and presence semantics" do
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "value", operator: "equals", value: 1 },
+        { value: "1" }, get_regex
+      )).to be false
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "value", operator: "equals", value: 1 },
+        { value: true }, get_regex
+      )).to be false
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "value", operator: "exists" },
+        { value: nil }, get_regex
+      )).to be true
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "value", operator: "notExists" },
+        { value: nil }, get_regex
+      )).to be false
+    end
+
+    it "uses strict primitive membership for in and includes" do
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "value", operator: "in", value: [1] },
+        { value: "1" }, get_regex
+      )).to be false
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "values", operator: "includes", value: 1 },
+        { values: [1, true, nil] }, get_regex
+      )).to be true
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "values", operator: "includes", value: nil },
+        { values: [1, true, nil] }, get_regex
+      )).to be true
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "values", operator: "includes", value: 1 },
+        { values: ["1"] }, get_regex
+      )).to be false
+    end
 
     describe "equals" do
       it "should match exact values" do
@@ -350,6 +388,23 @@ RSpec.describe Featurevisor::Conditions do
           Featurevisor::Conditions.condition_is_matched(condition, { version: "1.1.0" }, get_regex)
         ).to be false
       end
+
+      it "should compare prereleases and ignore build metadata" do
+        expect(
+          Featurevisor::Conditions.condition_is_matched(
+            { attribute: "version", operator: "semverLessThan", value: "1.2.3" },
+            { version: "1.2.3-beta.1" },
+            get_regex
+          )
+        ).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(
+            { attribute: "version", operator: "semverEquals", value: "1.2.3+build.9" },
+            { version: "1.2.3+build.5" },
+            get_regex
+          )
+        ).to be true
+      end
     end
 
     describe "regex operators" do
@@ -381,6 +436,20 @@ RSpec.describe Featurevisor::Conditions do
         context = { date: "2023-05-12T00:00:00Z" }
 
         expect(Featurevisor::Conditions.condition_is_matched(condition, context, get_regex)).to be true
+        expect(
+          Featurevisor::Conditions.condition_is_matched(
+            condition,
+            { date: "2023-05-12T00:00:00" },
+            get_regex
+          )
+        ).to be false
+        expect(
+          Featurevisor::Conditions.condition_is_matched(
+            condition,
+            { date: "2023-05-13T17:23:59+01:00" },
+            get_regex
+          )
+        ).to be false
       end
 
       it "should handle after" do

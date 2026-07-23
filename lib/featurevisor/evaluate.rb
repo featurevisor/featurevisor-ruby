@@ -55,14 +55,15 @@ module Featurevisor
         # Default: variation
         if options.key?(:default_variation_value) &&
            evaluation[:type] == "variation" &&
-           evaluation[:variation_value].nil?
+           !evaluation.key?(:variation_value) &&
+           !evaluation.key?(:variation)
           evaluation[:variation_value] = options[:default_variation_value]
         end
 
         # Default: variable
         if options.key?(:default_variable_value) &&
            evaluation[:type] == "variable" &&
-           evaluation[:variable_value].nil?
+           !evaluation.key?(:variable_value)
           evaluation[:variable_value] = options[:default_variable_value]
         end
 
@@ -76,7 +77,7 @@ module Featurevisor
         type = options[:type]
         feature_key = options[:feature_key]
         variable_key = options[:variable_key]
-        logger = options[:logger]
+        diagnostics = options[:diagnostics]
 
         evaluation = {
           type: type,
@@ -86,7 +87,7 @@ module Featurevisor
           error: e
         }
 
-        logger.error("error during evaluation", evaluation)
+        diagnostics.error("Error during evaluation", evaluation)
 
         evaluation
       end
@@ -100,8 +101,8 @@ module Featurevisor
       feature_key = options[:feature_key]
       variable_key = options[:variable_key]
       context = options[:context]
-      logger = options[:logger]
-      datafile_reader = options[:datafile_reader]
+      diagnostics = options[:diagnostics]
+      datafile = options[:datafile]
       sticky = options[:sticky]
       modules_manager = options[:modules_manager]
       evaluation = nil
@@ -120,7 +121,7 @@ module Featurevisor
               reason: Featurevisor::EvaluationReason::DISABLED
             }
 
-            feature = datafile_reader.get_feature(feature_key)
+            feature = datafile.get_feature(feature_key)
 
             # serve variable default value if feature is disabled (if explicitly specified)
             if type == "variable"
@@ -156,7 +157,7 @@ module Featurevisor
             end
 
             # serve disabled variation value if feature is disabled (if explicitly specified)
-            if type == "variation" && feature && feature[:disabledVariationValue]
+            if type == "variation" && feature && feature.key?(:disabledVariationValue)
               evaluation = {
                 type: type,
                 feature_key: feature_key,
@@ -166,7 +167,7 @@ module Featurevisor
               }
             end
 
-            logger.debug("feature is disabled", evaluation)
+            diagnostics.debug("feature is disabled", evaluation)
 
             return evaluation
           end
@@ -186,7 +187,7 @@ module Featurevisor
               enabled: sticky_feature[:enabled]
             }
 
-            logger.debug("using sticky enabled", evaluation)
+            diagnostics.debug("using sticky enabled", evaluation)
 
             return evaluation
           end
@@ -195,7 +196,7 @@ module Featurevisor
           if type == "variation"
             variation_value = sticky_feature[:variation]
 
-            unless variation_value.nil?
+            if sticky_feature.key?(:variation)
               evaluation = {
                 type: type,
                 feature_key: feature_key,
@@ -203,7 +204,7 @@ module Featurevisor
                 variation_value: variation_value
               }
 
-              logger.debug("using sticky variation", evaluation)
+              diagnostics.debug("using sticky variation", evaluation)
 
               return evaluation
             end
@@ -223,7 +224,7 @@ module Featurevisor
                 variable_value: variable_value
               }
 
-              logger.debug("using sticky variable", evaluation)
+              diagnostics.debug("using sticky variable", evaluation)
 
               return evaluation
             end
@@ -231,7 +232,7 @@ module Featurevisor
         end
 
         # Feature
-        feature = feature_key.is_a?(String) ? datafile_reader.get_feature(feature_key) : feature_key
+        feature = feature_key.is_a?(String) ? datafile.get_feature(feature_key) : feature_key
 
         # feature: not found
         unless feature
@@ -241,14 +242,14 @@ module Featurevisor
             reason: Featurevisor::EvaluationReason::FEATURE_NOT_FOUND
           }
 
-          logger.warn("feature not found", evaluation)
+          diagnostics.warn("feature not found", evaluation)
 
           return evaluation
         end
 
         # feature: deprecated
         if type == "flag" && feature[:deprecated]
-          logger.warn("feature is deprecated", { feature_key: feature_key })
+          diagnostics.warn("feature is deprecated", { feature_key: feature_key })
         end
 
         # variableSchema
@@ -268,13 +269,13 @@ module Featurevisor
               variable_key: variable_key
             }
 
-            logger.warn("variable schema not found", evaluation)
+            diagnostics.warn("variable schema not found", evaluation)
 
             return evaluation
           end
 
           if variable_schema[:deprecated]
-            logger.warn("variable is deprecated", {
+            diagnostics.warn("variable is deprecated", {
               feature_key: feature_key,
               variable_key: variable_key
             })
@@ -289,13 +290,13 @@ module Featurevisor
             reason: Featurevisor::EvaluationReason::NO_VARIATIONS
           }
 
-          logger.warn("no variations", evaluation)
+          diagnostics.warn("no variations", evaluation)
 
           return evaluation
         end
 
         # Forced
-        force_result = datafile_reader.get_matched_force(feature, context)
+        force_result = datafile.get_matched_force(feature, context)
         force = force_result[:force]
         force_index = force_result[:forceIndex]
 
@@ -311,7 +312,7 @@ module Featurevisor
               enabled: force[:enabled]
             }
 
-            logger.debug("forced enabled found", evaluation)
+            diagnostics.debug("forced enabled found", evaluation)
 
             return evaluation
           end
@@ -330,7 +331,7 @@ module Featurevisor
                 variation: variation
               }
 
-              logger.debug("forced variation found", evaluation)
+              diagnostics.debug("forced variation found", evaluation)
 
               return evaluation
             end
@@ -350,7 +351,7 @@ module Featurevisor
               variable_value: variable_value
             }
 
-            logger.debug("forced variable", evaluation)
+            diagnostics.debug("forced variable", evaluation)
 
             return evaluation
           end
@@ -400,7 +401,7 @@ module Featurevisor
               enabled: required_features_are_enabled
             }
 
-            logger.debug("required features not enabled", evaluation)
+            diagnostics.debug("required features not enabled", evaluation)
 
             return evaluation
           end
@@ -412,7 +413,7 @@ module Featurevisor
           feature_key: feature_key,
           bucket_by: feature[:bucketBy],
           context: context,
-          logger: logger
+          diagnostics: diagnostics
         })
 
         # Run bucket key modules
@@ -438,13 +439,13 @@ module Featurevisor
         matched_allocation = nil
 
         if type != "flag"
-          matched_traffic = datafile_reader.get_matched_traffic(feature[:traffic], context)
+          matched_traffic = datafile.get_matched_traffic(feature[:traffic], context)
 
           if matched_traffic
-            matched_allocation = datafile_reader.get_matched_allocation(matched_traffic, bucket_value)
+            matched_allocation = datafile.get_matched_allocation(matched_traffic, bucket_value)
           end
         else
-          matched_traffic = datafile_reader.get_matched_traffic(feature[:traffic], context)
+          matched_traffic = datafile.get_matched_traffic(feature[:traffic], context)
         end
 
         if matched_traffic
@@ -461,7 +462,7 @@ module Featurevisor
               enabled: false
             }
 
-            logger.debug("matched rule with 0 percentage", evaluation)
+            diagnostics.debug("matched rule with 0 percentage", evaluation)
 
             return evaluation
           end
@@ -487,7 +488,7 @@ module Featurevisor
                   enabled: matched_traffic[:enabled].nil? ? true : matched_traffic[:enabled]
                 }
 
-                logger.debug("matched", evaluation)
+                diagnostics.debug("matched", evaluation)
 
                 return evaluation
               end
@@ -502,7 +503,7 @@ module Featurevisor
                 enabled: false
               }
 
-              logger.debug("not matched", evaluation)
+              diagnostics.debug("not matched", evaluation)
 
               return evaluation
             end
@@ -520,7 +521,7 @@ module Featurevisor
                 enabled: matched_traffic[:enabled]
               }
 
-              logger.debug("override from rule", evaluation)
+              diagnostics.debug("override from rule", evaluation)
 
               return evaluation
             end
@@ -538,7 +539,7 @@ module Featurevisor
                 enabled: true
               }
 
-              logger.debug("matched traffic", evaluation)
+              diagnostics.debug("matched traffic", evaluation)
 
               return evaluation
             end
@@ -562,7 +563,7 @@ module Featurevisor
                   variation: variation
                 }
 
-                logger.debug("override from rule", evaluation)
+                diagnostics.debug("override from rule", evaluation)
 
                 return evaluation
               end
@@ -584,7 +585,7 @@ module Featurevisor
                   variation: variation
                 }
 
-                logger.debug("allocated variation", evaluation)
+                diagnostics.debug("allocated variation", evaluation)
 
                 return evaluation
               end
@@ -603,10 +604,10 @@ module Featurevisor
             override_index = overrides.find_index do |o|
               if o[:conditions]
                 conditions = o[:conditions].is_a?(String) && o[:conditions] != "*" ? JSON.parse(o[:conditions]) : o[:conditions]
-                datafile_reader.all_conditions_are_matched(conditions, context)
+                datafile.all_conditions_are_matched(conditions, context)
               elsif o[:segments]
-                segments = datafile_reader.parse_segments_if_stringified(o[:segments])
-                datafile_reader.all_segments_are_matched(segments, context)
+                segments = datafile.parse_segments_if_stringified(o[:segments])
+                datafile.all_segments_are_matched(segments, context)
               else
                 false
               end
@@ -629,7 +630,7 @@ module Featurevisor
                 variable_override_index: override_index
               }
 
-              logger.debug("variable override from rule", evaluation)
+              diagnostics.debug("variable override from rule", evaluation)
 
               return evaluation
             end
@@ -652,7 +653,7 @@ module Featurevisor
               variable_value: variable_value
             }
 
-            logger.debug("override from rule", evaluation)
+            diagnostics.debug("override from rule", evaluation)
 
             return evaluation
           end
@@ -677,10 +678,10 @@ module Featurevisor
               override_index = overrides.find_index do |o|
                 if o[:conditions]
                   conditions = o[:conditions].is_a?(String) && o[:conditions] != "*" ? JSON.parse(o[:conditions]) : o[:conditions]
-                  datafile_reader.all_conditions_are_matched(conditions, context)
+                  datafile.all_conditions_are_matched(conditions, context)
                 elsif o[:segments]
-                  segments = datafile_reader.parse_segments_if_stringified(o[:segments])
-                  datafile_reader.all_segments_are_matched(segments, context)
+                  segments = datafile.parse_segments_if_stringified(o[:segments])
+                  datafile.all_segments_are_matched(segments, context)
                 else
                   false
                 end
@@ -702,7 +703,7 @@ module Featurevisor
                   variable_override_index: override_index
                 }
 
-                logger.debug("variable override from variation", evaluation)
+                diagnostics.debug("variable override from variation", evaluation)
 
                 return evaluation
               end
@@ -725,7 +726,7 @@ module Featurevisor
                 variable_value: variable_value
               }
 
-              logger.debug("allocated variable", evaluation)
+              diagnostics.debug("allocated variable", evaluation)
 
               return evaluation
             end
@@ -742,7 +743,7 @@ module Featurevisor
             bucket_value: bucket_value
           }
 
-          logger.debug("no matched variation", evaluation)
+          diagnostics.debug("no matched variation", evaluation)
 
           return evaluation
         end
@@ -760,7 +761,7 @@ module Featurevisor
               variable_value: variable_schema[:defaultValue]
             }
 
-            logger.debug("using default value", evaluation)
+            diagnostics.debug("using default value", evaluation)
 
             return evaluation
           end
@@ -774,7 +775,7 @@ module Featurevisor
             bucket_value: bucket_value
           }
 
-          logger.debug("variable not found", evaluation)
+          diagnostics.debug("variable not found", evaluation)
 
           return evaluation
         end
@@ -788,7 +789,7 @@ module Featurevisor
           enabled: false
         }
 
-        logger.debug("nothing matched", evaluation)
+        diagnostics.debug("nothing matched", evaluation)
 
         evaluation
       rescue => e
@@ -800,7 +801,7 @@ module Featurevisor
           error: e
         }
 
-        logger.error("error", evaluation)
+        diagnostics.error("Error during evaluation", evaluation)
 
         evaluation
       end

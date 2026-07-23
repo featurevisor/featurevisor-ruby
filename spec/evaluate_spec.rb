@@ -38,19 +38,19 @@ RSpec.describe Featurevisor::Evaluate do
   end
 
   describe "evaluate_with_modules" do
-    let(:logger) { Featurevisor.const_get(:Logger).new(level: "warn") }
+    let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new(level: "warn") }
     let(:datafile_reader) do
-      Featurevisor.const_get(:DatafileReader).new(
+      Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
           segments: {},
           features: {}
         },
-        logger: logger
+        diagnostics: diagnostics
       )
     end
-    let(:modules_manager) { Featurevisor::Modules::ModulesManager.new(logger: logger) }
+    let(:modules_manager) { Featurevisor::Modules::ModulesManager.new(diagnostics: diagnostics) }
 
     it "should be a method" do
       expect(Featurevisor::Evaluate).to respond_to(:evaluate_with_modules)
@@ -61,9 +61,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: "test-feature",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       }
 
       # Mock datafile_reader to raise an error
@@ -87,9 +87,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "variation",
         feature_key: "test-feature",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader,
+        datafile: datafile_reader,
         default_variation_value: "default"
       }
 
@@ -114,9 +114,9 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "test-feature",
         variable_key: "test-var",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader,
+        datafile: datafile_reader,
         default_variable_value: "default"
       }
 
@@ -131,19 +131,19 @@ RSpec.describe Featurevisor::Evaluate do
   end
 
   describe "evaluate" do
-    let(:logger) { Featurevisor.const_get(:Logger).new(level: "warn") }
+    let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new(level: "warn") }
     let(:datafile_reader) do
-      Featurevisor.const_get(:DatafileReader).new(
+      Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
         datafile: {
           schemaVersion: "2.0",
           revision: "1",
           segments: {},
           features: {}
         },
-        logger: logger
+        diagnostics: diagnostics
       )
     end
-    let(:modules_manager) { Featurevisor::Modules::ModulesManager.new(logger: logger) }
+    let(:modules_manager) { Featurevisor::Modules::ModulesManager.new(diagnostics: diagnostics) }
 
     it "should be a method" do
       expect(Featurevisor::Evaluate).to respond_to(:evaluate)
@@ -154,9 +154,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: "non-existent-feature",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       }
 
       result = Featurevisor::Evaluate.evaluate(options)
@@ -176,9 +176,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: "test-feature",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader,
+        datafile: datafile_reader,
         sticky: sticky
       }
 
@@ -200,9 +200,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "variation",
         feature_key: "test-feature",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader,
+        datafile: datafile_reader,
         sticky: sticky
       }
 
@@ -226,9 +226,9 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: "test-feature",
         variable_key: "test-var",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader,
+        datafile: datafile_reader,
         sticky: sticky
       }
 
@@ -259,9 +259,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: feature,
         context: { userId: "123" },
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       }
 
       result = Featurevisor::Evaluate.evaluate(options)
@@ -297,9 +297,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: feature,
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       }
 
       # We need to stub the recursive call to evaluate
@@ -354,9 +354,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: feature,
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       )
 
       expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::REQUIRED)
@@ -397,9 +397,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: feature,
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       )
 
       expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::REQUIRED)
@@ -410,9 +410,9 @@ RSpec.describe Featurevisor::Evaluate do
         type: "flag",
         feature_key: "test-feature",
         context: {},
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       }
 
       # Mock datafile_reader to raise an error
@@ -470,9 +470,9 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: feature,
         variable_key: :test_var,
         context: { country: "nl" },
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       )
 
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE)
@@ -532,9 +532,9 @@ RSpec.describe Featurevisor::Evaluate do
         feature_key: feature,
         variable_key: :test_var,
         context: { country: "nl" },
-        logger: logger,
+        diagnostics: diagnostics,
         modules_manager: modules_manager,
-        datafile_reader: datafile_reader
+        datafile: datafile_reader
       )
 
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_VARIATION)
