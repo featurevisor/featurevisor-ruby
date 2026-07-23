@@ -671,7 +671,7 @@ module FeaturevisorCLI
 
         if assertion.key?(:expectedToMatch)
           expected_to_match = assertion[:expectedToMatch]
-          actual = instance.instance_variable_get(:@datafile_reader).all_conditions_are_matched(conditions, context)
+          actual = instance.instance_variable_get(:@datafile).all_conditions_are_matched(conditions, context)
 
           if actual != expected_to_match
             has_error = true

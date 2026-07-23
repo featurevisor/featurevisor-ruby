@@ -218,9 +218,12 @@ RSpec.describe "sdk: child" do
 
     expect(child_f.is_enabled("test")).to be true
     expect(child_f.get_variation("test")).to eq("control")
+    expect(child_f.evaluate_flag("test")[:enabled]).to be true
+    expect(child_f.evaluate_variation("test")[:variation][:value]).to eq("control")
 
     expect(child_f.get_variable("test", "color")).to eq("black")
     expect(child_f.get_variable_string("test", "color")).to eq("black")
+    expect(child_f.evaluate_variable("test", "color")[:variable_value]).to eq("black")
 
     expect(child_f.get_variable("test", "showSidebar")).to be false
     expect(child_f.get_variable_boolean("test", "showSidebar")).to be false
@@ -257,10 +260,49 @@ RSpec.describe "sdk: child" do
       }
     })
     expect(child_f.is_enabled("newFeature")).to be true
+    expect(child_f.evaluate_flag("newFeature")[:reason]).to eq("sticky")
 
     all_evaluations = child_f.get_all_evaluations
     expect(all_evaluations.keys).to eq([:test, :anotherTest])
 
     child_f.close
+  end
+end
+
+RSpec.describe "child lifecycle parity" do
+  it "removes delegated subscriptions when closed" do
+    parent = Featurevisor.create_featurevisor(log_level: "fatal")
+    child = parent.spawn
+    events = []
+    child.on("datafile_set") { |event| events << event }
+
+    child.close
+    child.close
+    parent.set_datafile(
+      {
+        schemaVersion: "2",
+        revision: "after-close",
+        segments: {},
+        features: {}
+      },
+      true
+    )
+
+    expect(events).to be_empty
+  end
+
+  it "matches JavaScript parent context snapshot behavior" do
+    parent = Featurevisor.create_featurevisor(
+      context: { country: "nl", plan: "free" },
+      log_level: "fatal"
+    )
+    child = parent.spawn(country: "de")
+    parent.set_context({ plan: "pro", locale: "de-DE" })
+
+    expect(child.get_context).to eq(
+      country: "de",
+      plan: "free",
+      locale: "de-DE"
+    )
   end
 end

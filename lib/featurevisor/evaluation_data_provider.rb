@@ -3,17 +3,17 @@
 require "json"
 
 module Featurevisor
-  # DatafileReader class for reading and processing Featurevisor datafiles
-  class DatafileReader
-    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :logger, :regex_cache
+  # Private datafile and matching adapter used by the evaluator.
+  class InstanceEvaluationDataProvider
+    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :diagnostics, :regex_cache
 
-    # Initialize a new DatafileReader
-    # @param options [Hash] Options hash containing datafile and logger
+    # Initialize a new evaluation data provider.
+    # @param options [Hash] Options hash containing datafile and diagnostics
     # @option options [Hash] :datafile Datafile content
-    # @option options [Logger] :logger Logger instance
+    # @option options [DiagnosticReporter] :diagnostics Diagnostic reporter
     def initialize(options)
       datafile = options[:datafile]
-      @logger = options[:logger]
+      @diagnostics = options[:diagnostics]
 
       @schema_version = datafile[:schemaVersion]
       @revision = datafile[:revision]
@@ -133,7 +133,15 @@ module Featurevisor
 
       return @regex_cache[cache_key] if @regex_cache[cache_key]
 
-      regex = Regexp.new(regex_string, flags)
+      ruby_flags = 0
+      ruby_flags |= Regexp::IGNORECASE if flags.include?("i")
+      # Ruby's MULTILINE option controls dot matching newlines, which is the
+      # JavaScript `s` behavior. Ruby anchors already operate per line.
+      ruby_flags |= Regexp::MULTILINE if flags.include?("s")
+      invalid_flags = flags.delete("gimsuy")
+      raise ArgumentError, "invalid regular expression flags: #{invalid_flags}" unless invalid_flags.empty?
+
+      regex = Regexp.new(regex_string, ruby_flags)
       @regex_cache[cache_key] = regex
       @regex_cache[cache_key]
     end
@@ -155,12 +163,11 @@ module Featurevisor
           result = Conditions.condition_is_matched(conditions, context, get_regex_proc)
           return result
         rescue => e
-          @logger.warn("Error in condition evaluation: #{e.message}", {
-            error: e.class.name,
-            details: {
-              condition: conditions,
-              context: context
-            }
+          @diagnostics.warn(e.message, {
+            code: "condition_match_error",
+            error: e,
+            condition: conditions,
+            context: context
           })
           return false
         end
@@ -183,10 +190,12 @@ module Featurevisor
       end
 
       if conditions.is_a?(Hash) && conditions[:not] && conditions[:not].is_a?(Array)
+        return false if conditions[:not].empty?
         return !all_conditions_are_matched({ and: conditions[:not] }, context)
       end
 
       if conditions.is_a?(Hash) && conditions["not"] && conditions["not"].is_a?(Array)
+        return false if conditions["not"].empty?
         return !all_conditions_are_matched({ "and" => conditions["not"] }, context)
       end
 
@@ -244,10 +253,12 @@ module Featurevisor
         end
 
         if group_segments[:not] && group_segments[:not].is_a?(Array)
+          return false if group_segments[:not].empty?
           return !all_segments_are_matched({ and: group_segments[:not] }, context)
         end
 
         if group_segments["not"] && group_segments["not"].is_a?(Array)
+          return false if group_segments["not"].empty?
           return !all_segments_are_matched({ "and" => group_segments["not"] }, context)
         end
 
@@ -333,7 +344,7 @@ module Featurevisor
       begin
         JSON.parse(conditions)
       rescue => e
-        @logger.error("Error parsing conditions", {
+        @diagnostics.error("Error parsing conditions", {
           error: e,
           details: {
             conditions: conditions
@@ -355,5 +366,5 @@ module Featurevisor
     end
   end
 
-  private_constant :DatafileReader
+  private_constant :InstanceEvaluationDataProvider
 end

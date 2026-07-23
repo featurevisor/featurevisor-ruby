@@ -89,6 +89,8 @@ f = Featurevisor.create_featurevisor(
 
 Most applications only need this factory and the returned `Featurevisor::Instance`. Public extension and observability APIs include modules, diagnostics, events, and the datafile structures accepted by the factory.
 
+Concurrent evaluations are safe after an instance is configured. Do not mutate or close the same instance concurrently with evaluations. Serialize calls to `set_datafile`, `set_context`, `set_sticky`, `add_module`, `remove_module`, and `close`. Module, event, and diagnostic callbacks must synchronize mutable state that they capture.
+
 ## Initialization
 
 The SDK can be initialized by passing [datafile](https://featurevisor.com/docs/building-datafiles/) content directly:
@@ -697,6 +699,8 @@ f.remove_module('my-custom-module')
 
 ## Child instance
 
+A child snapshots the parent keys that exist when it is spawned. Child values win for those keys. Parent keys introduced later are still inherited. Calling `close` removes both child-owned listeners and subscriptions delegated to the parent.
+
 When dealing with purely client-side applications, it is understandable that there is only one user involved, like in browser or mobile applications.
 
 But when using Featurevisor SDK in server-side applications, where a single server instance can handle multiple user requests simultaneously, it is important to isolate the context for each request.
@@ -722,8 +726,11 @@ Similar to parent SDK, child instances also support several additional methods:
 
 - `set_context`
 - `set_sticky`
+- `evaluate_flag`
 - `is_enabled`
+- `evaluate_variation`
 - `get_variation`
+- `evaluate_variable`
 - `get_variable`
 - `get_variable_boolean`
 - `get_variable_string`
@@ -821,7 +828,7 @@ The provider currently requires Ruby 3.4 or newer because that is the minimum ve
 Install the provider:
 
 ```ruby
-gem "featurevisor-openfeature", "~> 1.1"
+gem "featurevisor-openfeature", "~> 2.0"
 ```
 
 It installs the matching `featurevisor` gem and the official `openfeature-sdk` dependency. The provider and base SDK deliberately share the same version, and the provider requires that exact Featurevisor version.
@@ -901,7 +908,7 @@ The build produces `featurevisor-VERSION.gem` and `featurevisor-openfeature-VERS
 - Run `bundle install`
 - Push commit to `main` branch
 - Wait for CI to complete
-- Tag the release with the same version number, for example `v1.1.0`
+- Tag the release with the same version number, for example `v2.0.0`
 - The workflow verifies that the tag matches the shared version
 - The workflow publishes `featurevisor` first, followed by `featurevisor-openfeature`
 

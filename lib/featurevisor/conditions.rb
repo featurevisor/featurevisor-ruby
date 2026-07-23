@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
 require "date"
+require "time"
 
 module Featurevisor
   # Conditions module for evaluating feature flags and segments
   module Conditions
+    MISSING = Object.new.freeze
+    private_constant :MISSING
+
     # Get value from context object using dot notation path
     # @param obj [Hash] Context object
     # @param path [String] Dot-separated path to the value
@@ -12,12 +16,36 @@ module Featurevisor
     def self.get_value_from_context(obj, path)
       return nil if obj.nil? || path.nil?
 
-      if path.index(".") == -1
-        return obj[path.to_sym] || obj[path]
-      end
-
-      path.split(".").reduce(obj) { |o, i| o&.[](i.to_sym) || o&.[](i) }
+      value = get_value_with_presence(obj, path)
+      value.equal?(MISSING) ? nil : value
     end
+
+    def self.get_value_with_presence(obj, path)
+      return MISSING unless obj.is_a?(Hash) && path.is_a?(String)
+
+      path.split(".").reduce(obj) do |current, key|
+        break MISSING unless current.is_a?(Hash)
+
+        if current.key?(key.to_sym)
+          current[key.to_sym]
+        elsif current.key?(key)
+          current[key]
+        else
+          break MISSING
+        end
+      end
+    end
+    private_class_method :get_value_with_presence
+
+    def self.strict_equal?(left, right)
+      return true if left.nil? && right.nil?
+      return left.to_f == right.to_f if left.is_a?(Numeric) && right.is_a?(Numeric)
+      return left == right if left.is_a?(String) && right.is_a?(String)
+      return left == right if (left == true || left == false) && (right == true || right == false)
+
+      false
+    end
+    private_class_method :strict_equal?
 
     # Check if a condition is matched against context
     # @param condition [Hash] Condition to evaluate
@@ -30,18 +58,19 @@ module Featurevisor
       value = condition["value"] || condition[:value]
       regex_flags = condition["regexFlags"] || condition[:regexFlags]
 
-      context_value_from_path = get_value_from_context(context, attribute)
+      raw_context_value = get_value_with_presence(context, attribute)
+      context_value_from_path = raw_context_value.equal?(MISSING) ? nil : raw_context_value
+      attribute_exists = !raw_context_value.equal?(MISSING)
 
       case operator
       when "equals"
-        context_value_from_path == value
+        attribute_exists && strict_equal?(context_value_from_path, value)
       when "notEquals"
-        context_value_from_path != value
+        !attribute_exists || !strict_equal?(context_value_from_path, value)
       when "before", "after"
-        # date comparisons
-        value_in_context = context_value_from_path
-        date_in_context = value_in_context.is_a?(Date) ? value_in_context : Date.parse(value_in_context.to_s)
-        date_in_condition = value.is_a?(Date) ? value : Date.parse(value.to_s)
+        date_in_context = portable_date(context_value_from_path)
+        date_in_condition = portable_date(value)
+        return false unless date_in_context && date_in_condition
 
         if operator == "before"
           date_in_context < date_in_condition
@@ -50,21 +79,13 @@ module Featurevisor
         end
       when "in", "notIn"
         # in / notIn (where condition value is an array)
-        if value.is_a?(Array) && (context_value_from_path.is_a?(String) || context_value_from_path.is_a?(Numeric) || context_value_from_path.nil?)
-          # Check if the attribute key actually exists in the context
-          key_exists = context.key?(attribute.to_sym) || context.key?(attribute.to_s)
-
-          # If key doesn't exist, notIn should fail (return false), in should also fail
-          if !key_exists
-            return false
-          end
-
-          value_in_context = context_value_from_path.to_s
-
+        if attribute_exists && value.is_a?(Array) &&
+           (context_value_from_path.is_a?(String) || context_value_from_path.is_a?(Numeric) || context_value_from_path.nil?)
+          matched = value.any? { |candidate| strict_equal?(candidate, context_value_from_path) }
           if operator == "in"
-            value.include?(value_in_context)
+            matched
           else # notIn
-            !value.include?(value_in_context)
+            !matched
           end
         else
           false
@@ -124,18 +145,18 @@ module Featurevisor
           false
         end
       when "exists"
-        context_value_from_path != nil
+        attribute_exists
       when "notExists"
-        context_value_from_path.nil?
+        !attribute_exists
       when "includes", "notIncludes"
         # includes / notIncludes (where context value is an array)
-        if context_value_from_path.is_a?(Array) && value.is_a?(String)
-          value_in_context = context_value_from_path
-
+        if context_value_from_path.is_a?(Array) &&
+           (value.is_a?(String) || value.is_a?(Numeric) || value == true || value == false || value.nil?)
+          matched = context_value_from_path.any? { |candidate| strict_equal?(candidate, value) }
           if operator == "includes"
-            value_in_context.include?(value)
+            matched
           else # notIncludes
-            !value_in_context.include?(value)
+            !matched
           end
         else
           false
@@ -143,10 +164,18 @@ module Featurevisor
       else
         false
       end
-    rescue => e
-      # Log error but don't stop execution
-      warn "Error in condition evaluation: #{e.message}"
-      false
     end
+
+    def self.portable_date(value)
+      return value if value.is_a?(Time) || value.is_a?(DateTime)
+      return value.to_time if value.is_a?(Date)
+      return nil unless value.is_a?(String)
+      return nil unless value.match?(/T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+\-]\d{2}:\d{2})\z/)
+
+      Time.iso8601(value)
+    rescue ArgumentError
+      nil
+    end
+    private_class_method :portable_date
   end
 end

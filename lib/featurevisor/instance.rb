@@ -25,9 +25,9 @@ module Featurevisor
     def initialize(options = {})
       # from options
       @context = options[:context] || {}
-      @logger = Logger.new(
+      @diagnostics = DiagnosticReporter.new(
         level: options[:log_level] || "info",
-        handler: method(:handle_internal_log)
+        handler: method(:handle_evaluation_diagnostic)
       )
       @on_diagnostic = options[:on_diagnostic] || options[:onDiagnostic]
       @emitter = Featurevisor::Emitter.new
@@ -36,9 +36,9 @@ module Featurevisor
       @module_diagnostic_subscriptions = []
 
       # datafile
-      @datafile_reader = DatafileReader.new(
+      @datafile = InstanceEvaluationDataProvider.new(
         datafile: EMPTY_DATAFILE,
-        logger: @logger
+        diagnostics: @diagnostics
       )
 
       @modules_manager = Featurevisor::Modules::ModulesManager.new(
@@ -62,21 +62,35 @@ module Featurevisor
     # Set the log level
     # @param level [String] Log level
     def set_log_level(level)
-      @logger.set_level(level)
+      @diagnostics.set_level(level)
     end
 
-    def handle_internal_log(level, message, details = nil)
+    def handle_evaluation_diagnostic(level, message, details = nil)
       details = (details || {}).dup
-      code = details[:reason] || details["reason"] || message
+      code = details.delete(:code) || details.delete("code") || details[:reason] || details["reason"] || message
       code = "deprecated_feature" if message == "feature is deprecated"
       code = "deprecated_variable" if message == "variable is deprecated"
       code = "feature_not_found" if message == "feature not found"
       code = "variable_not_found" if message == "variable schema not found"
       code = "no_variations" if message == "no variations"
       code = "invalid_bucket_by" if message == "invalid bucketBy"
-      report_diagnostic(level: level, code: code.to_s, message: message, details: details)
+      code = "evaluation_error" if message == "Error during evaluation"
+      code = "conditions_parse_error" if message == "Error parsing conditions"
+      original_error = details.delete(:error) || details.delete("error")
+      nested_details = details.delete(:details) || details.delete("details")
+      details.merge!(nested_details) if nested_details.is_a?(Hash)
+      if details.key?(:feature_key) && details.key?(:reason)
+        evaluation = details.dup
+        details = {
+          featureKey: evaluation[:feature_key],
+          variableKey: evaluation[:variable_key],
+          reason: evaluation[:reason],
+          evaluation: camelize_diagnostic_value(evaluation)
+        }
+      end
+      report_diagnostic(level: level, code: code.to_s, message: message, details: details, originalError: original_error)
     end
-    private :handle_internal_log
+    private :handle_evaluation_diagnostic
 
     # Set the datafile
     # @param datafile [Hash, String] Datafile content or JSON string
@@ -97,14 +111,14 @@ module Featurevisor
                parsed_datafile[:features].is_a?(Hash)
           raise ArgumentError, "Invalid datafile"
         end
-        next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile_reader.get_datafile, parsed_datafile)
-        new_datafile_reader = DatafileReader.new(
+        next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile.get_datafile, parsed_datafile)
+        new_datafile = InstanceEvaluationDataProvider.new(
           datafile: next_datafile,
-          logger: @logger
+          diagnostics: @diagnostics
         )
 
-        details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile_reader, new_datafile_reader, replace)
-        @datafile_reader = new_datafile_reader
+        details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile, new_datafile, replace)
+        @datafile = new_datafile
 
         report_diagnostic(
           level: "info",
@@ -152,34 +166,34 @@ module Featurevisor
     # Get the revision
     # @return [String] Revision string
     def get_revision
-      @datafile_reader.get_revision
+      @datafile.get_revision
     end
 
     def get_schema_version
-      @datafile_reader.get_schema_version
+      @datafile.get_schema_version
     end
 
     def get_segment(segment_key)
-      @datafile_reader.get_segment(segment_key)
+      @datafile.get_segment(segment_key)
     end
 
     def get_feature_keys
-      @datafile_reader.get_feature_keys
+      @datafile.get_feature_keys
     end
 
     def get_variable_keys(feature_key)
-      @datafile_reader.get_variable_keys(feature_key)
+      @datafile.get_variable_keys(feature_key)
     end
 
     def has_variations?(feature_key)
-      @datafile_reader.has_variations?(feature_key)
+      @datafile.has_variations?(feature_key)
     end
 
     # Get a feature by key
     # @param feature_key [String] Feature key
     # @return [Hash, nil] Feature data or nil if not found
     def get_feature(feature_key)
-      @datafile_reader.get_feature(feature_key)
+      @datafile.get_feature(feature_key)
     end
 
     # Add a module
@@ -189,8 +203,8 @@ module Featurevisor
       @modules_manager.add(mod)
     end
 
-    def remove_module(name_or_module)
-      @modules_manager.remove(name_or_module)
+    def remove_module(name)
+      @modules_manager.remove(name)
     end
 
     # Subscribe to an event
@@ -198,11 +212,15 @@ module Featurevisor
     # @param callback [Proc] Callback function
     # @return [Proc] Unsubscribe function
     def on(event_name, callback)
+      return -> {} if @closed
+
       @emitter.on(event_name, callback)
     end
 
     # Close the instance
     def close
+      return if @closed
+
       @closed = true
       @modules_manager.close_all
       @module_diagnostic_subscriptions = []
@@ -285,7 +303,7 @@ module Featurevisor
         evaluation = evaluate_flag(feature_key, context, options)
         evaluation[:enabled] == true
       rescue => e
-        @logger.error("isEnabled", { feature_key: feature_key, error: e })
+        report_diagnostic(level: "error", code: "evaluation_error", message: "isEnabled failed", originalError: e, details: { featureKey: feature_key })
         false
       end
     end
@@ -313,7 +331,7 @@ module Featurevisor
       begin
         evaluation = evaluate_variation(feature_key, context, options)
 
-        if evaluation[:variation_value]
+        if evaluation.key?(:variation_value)
           evaluation[:variation_value]
         elsif evaluation[:variation]
           evaluation[:variation][:value]
@@ -321,7 +339,7 @@ module Featurevisor
           nil
         end
       rescue => e
-        @logger.error("getVariation", { feature_key: feature_key, error: e })
+        report_diagnostic(level: "error", code: "evaluation_error", message: "getVariation failed", originalError: e, details: { featureKey: feature_key })
         nil
       end
     end
@@ -352,7 +370,7 @@ module Featurevisor
       begin
         evaluation = evaluate_variable(feature_key, variable_key, context, options)
 
-        if !evaluation[:variable_value].nil?
+        if evaluation.key?(:variable_value)
           if evaluation[:variable_schema] &&
              evaluation[:variable_schema][:type] == "json" &&
              evaluation[:variable_value].is_a?(String)
@@ -364,7 +382,7 @@ module Featurevisor
           nil
         end
       rescue => e
-        @logger.error("getVariable", { feature_key: feature_key, variable_key: variable_key, error: e })
+        report_diagnostic(level: "error", code: "evaluation_error", message: "getVariable failed", originalError: e, details: { featureKey: feature_key, variableKey: variable_key })
         nil
       end
     end
@@ -454,7 +472,7 @@ module Featurevisor
     def get_all_evaluations(context = {}, feature_keys = [], options = {})
       result = {}
 
-              keys = feature_keys.size > 0 ? feature_keys : @datafile_reader.get_feature_keys
+      keys = feature_keys.size > 0 ? feature_keys : @datafile.get_feature_keys
 
       keys.each do |feature_key|
         # Convert symbol keys to strings for evaluation functions
@@ -466,13 +484,13 @@ module Featurevisor
         }
 
         # variation
-        if @datafile_reader.has_variations?(feature_key_str)
+        if @datafile.has_variations?(feature_key_str)
           variation = get_variation(feature_key_str, context, options)
-          evaluated_feature[:variation] = variation if variation
+          evaluated_feature[:variation] = variation unless variation.nil?
         end
 
         # variables
-        variable_keys = @datafile_reader.get_variable_keys(feature_key_str)
+        variable_keys = @datafile.get_variable_keys(feature_key_str)
         if variable_keys.size > 0
           evaluated_feature[:variables] = {}
 
@@ -501,13 +519,14 @@ module Featurevisor
     def get_evaluation_dependencies(context, options = {})
       {
         context: get_context(context),
-        logger: @logger,
+        diagnostics: @diagnostics,
         modules_manager: @modules_manager,
-        datafile_reader: @datafile_reader,
+        datafile: @datafile,
         sticky: options[:__featurevisor_child_sticky] || @sticky,
-        default_variation_value: options[:default_variation_value],
-        default_variable_value: options[:default_variable_value]
-      }
+      }.tap do |dependencies|
+        dependencies[:default_variation_value] = options[:default_variation_value] if options.key?(:default_variation_value)
+        dependencies[:default_variable_value] = options[:default_variable_value] if options.key?(:default_variable_value)
+      end
     end
 
     # Get value by type
@@ -584,7 +603,7 @@ module Featurevisor
       diagnostic = (diagnostic || {}).dup
       diagnostic[:level] ||= "info"
       diagnostic[:module] = source_module.name if source_module && source_module.name
-      details = (diagnostic[:details] || {}).dup
+      details = camelize_diagnostic_value((diagnostic[:details] || {}).dup)
       legacy_module_name = diagnostic.delete(:module_name)
       legacy_original_error = diagnostic.delete(:original_error)
       diagnostic[:moduleName] = legacy_module_name if !diagnostic.key?(:moduleName) && !legacy_module_name.nil?
@@ -609,7 +628,7 @@ module Featurevisor
       end
 
       if @on_diagnostic
-        if should_report_diagnostic?(diagnostic[:level], @logger.level)
+        if should_report_diagnostic?(diagnostic[:level], @diagnostics.level)
           begin
             @on_diagnostic.call(diagnostic)
           rescue => e
@@ -617,7 +636,7 @@ module Featurevisor
           end
         end
       else
-        Logger.new(level: @logger.level).log(
+        DiagnosticReporter.new(level: @diagnostics.level).log(
           diagnostic[:level],
           diagnostic[:message],
           diagnostic
@@ -638,6 +657,21 @@ module Featurevisor
 
       subscriber_index >= diagnostic_index
     end
+
+    def camelize_diagnostic_value(value)
+      case value
+      when Hash
+        value.each_with_object({}) do |(key, item), result|
+          normalized_key = key.to_s.gsub(/_([a-z])/) { Regexp.last_match(1).upcase }.to_sym
+          result[normalized_key] = camelize_diagnostic_value(item)
+        end
+      when Array
+        value.map { |item| camelize_diagnostic_value(item) }
+      else
+        value
+      end
+    end
+    private :camelize_diagnostic_value
   end
 
   # Create a new Featurevisor instance

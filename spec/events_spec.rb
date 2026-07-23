@@ -1,7 +1,7 @@
 require "featurevisor"
 
 RSpec.describe Featurevisor::Events do
-  let(:logger) { Featurevisor.const_get(:Logger).new(level: "error") }
+  let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new(level: "error") }
 
   describe ".get_params_for_sticky_set_event" do
     it "should get params for sticky set event: empty to new" do
@@ -50,14 +50,14 @@ RSpec.describe Featurevisor::Events do
 
   describe ".get_params_for_datafile_set_event" do
     def build_reader(revision:, features:)
-      Featurevisor.const_get(:DatafileReader).new(
+      Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
         datafile: {
           schemaVersion: "1.0.0",
           revision: revision,
           features: features,
           segments: {}
         },
-        logger: logger
+        diagnostics: diagnostics
       )
     end
 

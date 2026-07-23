@@ -13,6 +13,7 @@ module Featurevisor
       @context = options[:context] || {}
       @sticky = options[:sticky] || {}
       @emitter = Featurevisor::Emitter.new
+      @parent_unsubscribers = []
     end
 
     # Subscribe to an event
@@ -25,12 +26,25 @@ module Featurevisor
       if event_name == "context_set" || event_name == "sticky_set"
         @emitter.on(event_name, callback)
       else
-        @parent.on(event_name, callback)
+        parent_unsubscribe = @parent.on(event_name, callback)
+        active = true
+        unsubscribe = nil
+        unsubscribe = proc do
+          next unless active
+
+          active = false
+          parent_unsubscribe.call
+          @parent_unsubscribers.delete(unsubscribe)
+        end
+        @parent_unsubscribers << unsubscribe
+        unsubscribe
       end
     end
 
     # Close the child instance
     def close
+      @parent_unsubscribers.dup.each(&:call)
+      @parent_unsubscribers.clear
       @emitter.clear_all
     end
 
@@ -98,6 +112,15 @@ module Featurevisor
       )
     end
 
+    # Evaluate a feature flag and return its full evaluation details.
+    def evaluate_flag(feature_key, context = {}, options = {})
+      @parent.evaluate_flag(
+        feature_key,
+        { **@context, **context },
+        { **options, __featurevisor_child_sticky: @sticky }
+      )
+    end
+
     # Get variation value
     # @param feature_key [String] Feature key
     # @param context [Hash] Context
@@ -114,6 +137,15 @@ module Featurevisor
           **options,
           __featurevisor_child_sticky: @sticky
         }
+      )
+    end
+
+    # Evaluate a variation and return its full evaluation details.
+    def evaluate_variation(feature_key, context = {}, options = {})
+      @parent.evaluate_variation(
+        feature_key,
+        { **@context, **context },
+        { **options, __featurevisor_child_sticky: @sticky }
       )
     end
 
@@ -135,6 +167,16 @@ module Featurevisor
           **options,
           __featurevisor_child_sticky: @sticky
         }
+      )
+    end
+
+    # Evaluate a variable and return its full evaluation details.
+    def evaluate_variable(feature_key, variable_key, context = {}, options = {})
+      @parent.evaluate_variable(
+        feature_key,
+        variable_key,
+        { **@context, **context },
+        { **options, __featurevisor_child_sticky: @sticky }
       )
     end
 

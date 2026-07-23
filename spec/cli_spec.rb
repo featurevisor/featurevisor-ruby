@@ -120,7 +120,15 @@ RSpec.describe FeaturevisorCLI::Commands::Benchmark do
         "features" => {
           "testFeature" => {
             "key" => "testFeature",
-            "variations" => []
+            "bucketBy" => "userId",
+            "variations" => [],
+            "traffic" => [
+              {
+                "key" => "everyone",
+                "segments" => "*",
+                "percentage" => 100_000
+              }
+            ]
           }
         }
       })

@@ -38,7 +38,7 @@ RSpec.describe Featurevisor::Bucketer do
   end
 
   describe "get_bucket_key" do
-    let(:logger) { Featurevisor.const_get(:Logger).new(level: "warn") }
+    let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new(level: "warn") }
 
     it "should be a method" do
       expect(Featurevisor::Bucketer).to respond_to(:get_bucket_key)
@@ -53,7 +53,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("123.test-feature")
@@ -68,7 +68,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("test-feature")
@@ -83,7 +83,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("123.234.test-feature")
@@ -98,7 +98,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("123.test-feature")
@@ -119,7 +119,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("123.234.test-feature")
@@ -134,7 +134,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("234.test-feature")
@@ -149,7 +149,7 @@ RSpec.describe Featurevisor::Bucketer do
         feature_key: feature_key,
         bucket_by: bucket_by,
         context: context,
-        logger: logger
+        diagnostics: diagnostics
       )
 
       expect(bucket_key).to eq("deviceIdHere.test-feature")
@@ -165,9 +165,28 @@ RSpec.describe Featurevisor::Bucketer do
           feature_key: feature_key,
           bucket_by: bucket_by,
           context: context,
-          logger: logger
+          diagnostics: diagnostics
         )
       end.to raise_error(StandardError, "invalid bucketBy")
+    end
+
+    it "stringifies bucket values like JavaScript" do
+      diagnostics = Featurevisor.const_get(:DiagnosticReporter).new(level: "fatal")
+
+      expect(Featurevisor::Bucketer.get_bucket_key(
+        feature_key: "feature", bucket_by: %w[missing enabled values object],
+        context: { missing: nil, enabled: false, values: [1, true, nil], object: { id: 1 } },
+        diagnostics: diagnostics
+      )).to eq(".false.1,true,.[object Object].feature")
+    end
+
+    it "normalizes whole floating point values and negative zero like JavaScript" do
+      diagnostics = Featurevisor.const_get(:DiagnosticReporter).new(level: "fatal")
+
+      expect(Featurevisor::Bucketer.get_bucket_key(
+        feature_key: "feature", bucket_by: %w[whole negative_zero small large],
+        context: { whole: 1.0, negative_zero: -0.0, small: 1e-6, large: 1e21 }, diagnostics: diagnostics
+      )).to eq("1.0.0.000001.1e+21.feature")
     end
   end
 
