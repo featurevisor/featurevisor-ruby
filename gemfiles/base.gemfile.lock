@@ -1,7 +1,7 @@
 PATH
   remote: ..
   specs:
-    featurevisor (1.1.0)
+    featurevisor (2.0.0)
       benchmark (>= 0, < 1)
 
 GEM
