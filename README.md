@@ -637,6 +637,8 @@ And optionally these properties depending on whether you are evaluating a featur
 
 Modules allow you to intercept the evaluation process and customize SDK behavior.
 
+For feature evaluations, all `before` callbacks run in registration order, followed by all `before_evaluation` callbacks. After evaluation and caller defaults, all `after_evaluation` callbacks run, followed by all `after` callbacks. Global variable evaluations use only `before_evaluation` and `after_evaluation`. Required feature checks run through the complete module pipeline, and transformed defaults are preserved.
+
 ### Defining a module
 
 A module is a simple hash with a unique recommended `name` and optional lifecycle functions:

@@ -20,7 +20,7 @@ module Featurevisor
     # @option options [Hash, String] :datafile Datafile content or JSON string
     # @option options [Hash] :context Initial context
     # @option options [String] :log_level Log level
-    # @option options [Hash] :sticky Sticky features
+    # @option options [Hash] :sticky_features Sticky features
     # @option options [Array<Hash, FeaturevisorModule>] :modules Array of modules
     # @option options [Proc] :on_diagnostic Diagnostic handler
     def initialize(options = {})
@@ -32,7 +32,7 @@ module Featurevisor
       )
       @on_diagnostic = options[:on_diagnostic] || options[:onDiagnostic]
       @emitter = Featurevisor::Emitter.new
-      @sticky_features = options[:sticky_features] || options[:stickyFeatures] || options[:sticky] || {}
+      @sticky_features = options[:sticky_features] || options[:stickyFeatures] || {}
       @sticky_variables = options[:sticky_variables] || options[:stickyVariables] || {}
       @closed = false
       @module_diagnostic_subscriptions = []
@@ -155,7 +155,7 @@ module Featurevisor
         }
       end
 
-      params = Featurevisor::Events.get_params_for_sticky_set_event(previous_sticky_features, @sticky_features, replace)
+      params = Featurevisor::Events.get_params_for_sticky_features_set_event(previous_sticky_features, @sticky_features, replace)
 
       report_diagnostic(
         level: "info",
@@ -164,10 +164,7 @@ module Featurevisor
         details: params
       )
       @emitter.trigger("sticky_features_set", params)
-      @emitter.trigger("sticky_set", params)
     end
-
-    alias set_sticky set_sticky_features
 
     def set_sticky_variables(sticky, replace = false)
       previous = @sticky_variables || {}
@@ -289,7 +286,7 @@ module Featurevisor
       Featurevisor::ChildInstance.new(
         parent: self,
         context: get_context(context),
-        sticky_features: options[:sticky_features] || options[:stickyFeatures] || options[:sticky],
+        sticky_features: options[:sticky_features] || options[:stickyFeatures],
         sticky_variables: options[:sticky_variables] || options[:stickyVariables]
       )
     end
@@ -530,8 +527,6 @@ module Featurevisor
       result
     end
 
-    alias get_all_evaluations get_feature_evaluations
-
     def get_variable_evaluations(context = {}, variable_keys = [], options = {})
       keys = variable_keys.empty? ? @datafile.get_variable_keys : variable_keys
       keys.to_h { |key| [key, get_variable(key.to_s, context, options)] }
@@ -559,9 +554,10 @@ module Featurevisor
                             variable_value: sticky_value)
         elsif variable
           unless required_features_are_matched(variable[:requiredFeatures], evaluation_options[:context], options)
-            value = variable[:useDefaultWhenDisabled] ? variable[:defaultValue] : variable[:disabledValue]
+            value_key = variable[:useDefaultWhenDisabled] ? :defaultValue : :disabledValue
             evaluation.merge!(reason: Featurevisor::EvaluationReason::REQUIRED_FEATURES_UNMET,
-                              variable: variable, variable_value: value)
+                              variable: variable)
+            evaluation[:variable_value] = variable[value_key] if variable.key?(value_key)
           else
             (variable[:overrides] || []).each_with_index do |override, index|
               next unless required_features_are_matched(override[:requiredFeatures], evaluation_options[:context], options)
@@ -574,21 +570,23 @@ module Featurevisor
               next unless conditions_match && segments_match
 
               evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE,
-                                variable: variable, variable_value: override[:value],
+                                variable: variable,
                                 variable_override_index: index, variable_override_key: override[:key],
                                 variable_override_path: override[:keyPath])
+              evaluation[:variable_value] = override[:value] if override.key?(:value)
               break
             end
             if evaluation[:reason] == Featurevisor::EvaluationReason::VARIABLE_NOT_FOUND
               evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_DEFAULT,
-                                variable: variable, variable_value: variable[:defaultValue])
+                                variable: variable)
+              evaluation[:variable_value] = variable[:defaultValue] if variable.key?(:defaultValue)
             end
           end
           report_diagnostic(level: "warn", code: "variable_deprecated", message: "Variable \"#{resolved_key}\" is deprecated",
                             details: { variableKey: resolved_key, evaluation: evaluation }) if variable[:deprecated]
         end
 
-        if evaluation[:variable_value].nil? && evaluation_options.key?(:default_variable_value)
+        if !evaluation.key?(:variable_value) && evaluation_options.key?(:default_variable_value)
           evaluation[:variable_value] = evaluation_options[:default_variable_value]
         end
         evaluation = @modules_manager.run_global_after_modules(evaluation, evaluation_options)
@@ -633,7 +631,7 @@ module Featurevisor
         diagnostics: @diagnostics,
         modules_manager: @modules_manager,
         datafile: @datafile,
-        sticky: options[:__featurevisor_child_sticky_features] || options[:__featurevisor_child_sticky] || @sticky_features,
+        sticky: options[:__featurevisor_child_sticky_features] || @sticky_features,
         sticky_variables: options[:__featurevisor_child_sticky_variables] || @sticky_variables,
       }.tap do |dependencies|
         dependencies[:default_variation_value] = options[:default_variation_value] if options.key?(:default_variation_value)

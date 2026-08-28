@@ -10,7 +10,7 @@ module Featurevisor
     # @param new_sticky [Hash] New sticky features
     # @param replace [Boolean] Whether features were replaced
     # @return [Hash] Event parameters
-    def self.get_params_for_sticky_set_event(previous_sticky = {}, new_sticky = {}, replace = false)
+    def self.get_params_for_sticky_features_set_event(previous_sticky = {}, new_sticky = {}, replace = false)
       keys_before = previous_sticky.keys
       keys_after = new_sticky.keys
 

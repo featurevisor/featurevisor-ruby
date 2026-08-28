@@ -6,7 +6,7 @@ module Featurevisor
     def initialize(options)
       @parent = options[:parent]
       @context = options[:context] || {}
-      @sticky_features = options[:sticky_features] || options[:sticky] || {}
+      @sticky_features = options[:sticky_features] || {}
       @sticky_variables = options[:sticky_variables] || {}
       @emitter = Featurevisor::Emitter.new
       @parent_unsubscribers = []
@@ -14,7 +14,7 @@ module Featurevisor
 
     def on(event_name, callback = nil, &block)
       callback = block if block_given?
-      if %w[context_set sticky_set sticky_features_set sticky_variables_set].include?(event_name)
+      if %w[context_set sticky_features_set sticky_variables_set].include?(event_name)
         return @emitter.on(event_name, callback)
       end
 
@@ -50,12 +50,9 @@ module Featurevisor
     def set_sticky_features(sticky, replace = false)
       previous = @sticky_features
       @sticky_features = replace ? sticky : { **@sticky_features, **sticky }
-      params = Featurevisor::Events.get_params_for_sticky_set_event(previous, @sticky_features, replace)
+      params = Featurevisor::Events.get_params_for_sticky_features_set_event(previous, @sticky_features, replace)
       @emitter.trigger("sticky_features_set", params)
-      @emitter.trigger("sticky_set", params)
     end
-
-    alias set_sticky set_sticky_features
 
     def set_sticky_variables(sticky, replace = false)
       previous = @sticky_variables
@@ -99,8 +96,6 @@ module Featurevisor
     def get_feature_evaluations(context = {}, feature_keys = [], options = {})
       @parent.get_feature_evaluations(child_context(context), feature_keys, child_options(options))
     end
-
-    alias get_all_evaluations get_feature_evaluations
 
     def get_variable_evaluations(context = {}, variable_keys = [], options = {})
       @parent.get_variable_evaluations(child_context(context), variable_keys, child_options(options))

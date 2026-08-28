@@ -3,7 +3,7 @@ require "featurevisor"
 RSpec.describe Featurevisor::Events do
   let(:diagnostics) { Featurevisor.const_get(:DiagnosticReporter).new(level: "error") }
 
-  describe ".get_params_for_sticky_set_event" do
+  describe ".get_params_for_sticky_features_set_event" do
     it "should get params for sticky set event: empty to new" do
       previous_sticky_features = {}
       new_sticky_features = {
@@ -12,7 +12,7 @@ RSpec.describe Featurevisor::Events do
       }
       replace = true
 
-      result = described_class.get_params_for_sticky_set_event(
+      result = described_class.get_params_for_sticky_features_set_event(
         previous_sticky_features,
         new_sticky_features,
         replace
@@ -35,7 +35,7 @@ RSpec.describe Featurevisor::Events do
       }
       replace = true
 
-      result = described_class.get_params_for_sticky_set_event(
+      result = described_class.get_params_for_sticky_features_set_event(
         previous_sticky_features,
         new_sticky_features,
         replace

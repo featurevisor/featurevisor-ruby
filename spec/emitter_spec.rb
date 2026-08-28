@@ -27,7 +27,7 @@ RSpec.describe Featurevisor::Emitter do
       expect(handled_details[0]).to eq({ key: "value" })
 
       # trigger unsubscribed event
-      emitter.trigger("sticky_set", { key: "value2" })
+      emitter.trigger("sticky_features_set", { key: "value2" })
       expect(handled_details.length).to eq(1)
 
       # unsubscribe
@@ -75,8 +75,8 @@ RSpec.describe Featurevisor::Emitter do
         metadata: { version: "1.0.0", environment: "production" }
       }
 
-      emitter.on("sticky_set", handle_details)
-      emitter.trigger("sticky_set", complex_details)
+      emitter.on("sticky_features_set", handle_details)
+      emitter.trigger("sticky_features_set", complex_details)
 
       expect(handled_details.length).to eq(1)
       expect(handled_details[0]).to eq(complex_details)
@@ -86,16 +86,16 @@ RSpec.describe Featurevisor::Emitter do
       calls = []
       unsubscribe_second = nil
 
-      emitter.on("sticky_set", ->(_details) {
+      emitter.on("sticky_features_set", ->(_details) {
         calls << "first"
         unsubscribe_second.call
       })
-      unsubscribe_second = emitter.on("sticky_set", ->(_details) {
+      unsubscribe_second = emitter.on("sticky_features_set", ->(_details) {
         calls << "second"
       })
 
-      emitter.trigger("sticky_set")
-      emitter.trigger("sticky_set")
+      emitter.trigger("sticky_features_set")
+      emitter.trigger("sticky_features_set")
 
       expect(calls).to eq(%w[first second first])
     end
@@ -166,7 +166,7 @@ RSpec.describe Featurevisor::Emitter do
     it "should remove all listeners from all events" do
       emitter.on("datafile_set", handle_details)
       emitter.on("context_set", handle_details)
-      emitter.on("sticky_set", handle_details)
+      emitter.on("sticky_features_set", handle_details)
 
       expect(emitter.listeners.keys.length).to eq(3)
 
@@ -190,7 +190,7 @@ RSpec.describe Featurevisor::Emitter do
 
   describe "constants" do
     it "should have correct event names" do
-      expect(Featurevisor::EVENT_NAMES).to eq(%w[datafile_set context_set sticky_set sticky_features_set sticky_variables_set error])
+      expect(Featurevisor::EVENT_NAMES).to eq(%w[datafile_set context_set sticky_features_set sticky_variables_set error])
     end
   end
 

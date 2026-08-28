@@ -30,7 +30,7 @@ RSpec.describe "sdk: instance" do
     )
 
     sdk.set_datafile(schemaVersion: "2", revision: "1", segments: {}, features: {})
-    sdk.set_sticky(test: { enabled: true })
+    sdk.set_sticky_features(test: { enabled: true })
     sdk.set_context(country: "nl")
 
     codes = diagnostics.map { |diagnostic| diagnostic[:code] }
@@ -333,7 +333,7 @@ RSpec.describe "sdk: instance" do
     }
 
     sdk = Featurevisor.create_featurevisor(
-      sticky: {
+      sticky_features: {
         test: {
           enabled: true,
           variation: "control",
@@ -367,7 +367,7 @@ RSpec.describe "sdk: instance" do
     ).to eq("control")
 
     # unsetting sticky features will make it treatment
-    sdk.set_sticky({}, true)
+    sdk.set_sticky_features({}, true)
     expect(
       sdk.get_variation("test", {
         userId: "123"
@@ -968,7 +968,7 @@ RSpec.describe "sdk: instance" do
       userId: "123"
     }
 
-    evaluated_features = sdk.get_all_evaluations(context)
+    evaluated_features = sdk.get_feature_evaluations(context)
     expect(evaluated_features).to eq({
       test: {
         enabled: true,

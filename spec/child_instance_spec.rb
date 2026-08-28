@@ -254,7 +254,7 @@ RSpec.describe "sdk: child" do
     unsubscribe_context.call
 
     expect(child_f.is_enabled("newFeature")).to be false
-    child_f.set_sticky({
+    child_f.set_sticky_features({
       newFeature: {
         enabled: true
       }
@@ -262,7 +262,7 @@ RSpec.describe "sdk: child" do
     expect(child_f.is_enabled("newFeature")).to be true
     expect(child_f.evaluate_flag("newFeature")[:reason]).to eq("sticky")
 
-    all_evaluations = child_f.get_all_evaluations
+    all_evaluations = child_f.get_feature_evaluations
     expect(all_evaluations.keys).to eq([:test, :anotherTest])
 
     child_f.close

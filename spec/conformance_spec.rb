@@ -6,7 +6,7 @@ require "featurevisor"
 RSpec.describe "Featurevisor v3 conformance" do
   it "uses the shared inclusive allocation contract" do
     fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
-    expect(fixture[:version]).to eq(5)
+    expect(fixture[:version]).to eq(6)
     reader = Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
       datafile: { schemaVersion: "2", revision: "conformance", segments: {}, features: {} },
       diagnostics: Featurevisor.const_get(:DiagnosticReporter).new(level: "fatal")
@@ -83,6 +83,27 @@ RSpec.describe "Featurevisor v3 conformance" do
     expect(f.get_variable(boundary[:sharedKey], boundary[:featureVariableKey])).to eq(boundary[:expectedFeatureValue])
     expect(f.get_variable_keys.map(&:to_s)).to include(boundary[:sharedKey])
     expect(f.get_variable_evaluations[boundary[:sharedKey].to_sym]).to eq(boundary[:expectedGlobalValue])
+  end
+
+  it "preserves explicit null values and module transformed defaults" do
+    null_datafile = {
+      schemaVersion: "2", revision: "null-default", segments: {}, features: {},
+      variables: { nullable: { key: "nullable", type: "json", defaultValue: nil } }
+    }
+    f = Featurevisor.create_featurevisor(datafile: null_datafile, log_level: "fatal")
+    evaluation = f.evaluate_variable("nullable", {}, default_variable_value: { fallback: true })
+    expect(evaluation).to have_key(:variable_value)
+    expect(evaluation[:variable_value]).to be_nil
+
+    transformed = Featurevisor.create_featurevisor(
+      datafile: { schemaVersion: "2", revision: "empty", segments: {}, features: {} },
+      log_level: "fatal",
+      modules: [{
+        name: "default",
+        before_evaluation: ->(options) { options.merge(default_variable_value: "from-module") }
+      }]
+    )
+    expect(transformed.get_variable("missing")).to eq("from-module")
   end
 
   it "supports canonical required features for flags and feature variable overrides" do

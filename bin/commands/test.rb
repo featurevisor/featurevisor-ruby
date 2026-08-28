@@ -389,7 +389,7 @@ module FeaturevisorCLI
         # Set context and sticky for this assertion
         instance.set_context(context, false)
         if sticky && !sticky.empty?
-          instance.set_sticky(sticky, false)
+          instance.set_sticky_features(sticky, false)
         end
 
         # Create override options
@@ -527,7 +527,7 @@ module FeaturevisorCLI
               # Create a local copy to ensure it's never nil
               child_sticky = sticky || {}
               if !child_sticky.empty?
-                child_instance.set_sticky(child_sticky, false)
+                child_instance.set_sticky_features(child_sticky, false)
               end
 
               child_result = run_test_feature_child(child, feature_key, child_instance, level)

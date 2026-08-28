@@ -98,18 +98,18 @@ module Featurevisor
         evaluation = evaluate(result_options)
 
         # Default: variation
-        if options.key?(:default_variation_value) &&
+        if result_options.key?(:default_variation_value) &&
            evaluation[:type] == "variation" &&
            !evaluation.key?(:variation_value) &&
            !evaluation.key?(:variation)
-          evaluation[:variation_value] = options[:default_variation_value]
+          evaluation[:variation_value] = result_options[:default_variation_value]
         end
 
         # Default: variable
-        if options.key?(:default_variable_value) &&
+        if result_options.key?(:default_variable_value) &&
            evaluation[:type] == "variable" &&
            !evaluation.key?(:variable_value)
-          evaluation[:variable_value] = options[:default_variable_value]
+          evaluation[:variable_value] = result_options[:default_variable_value]
         end
 
         # Run after modules
