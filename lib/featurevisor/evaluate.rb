@@ -19,6 +19,7 @@ module Featurevisor
     VARIABLE_DISABLED = "variable_disabled" # feature is disabled, and variable's disabledValue is used
     VARIABLE_OVERRIDE_VARIATION = "variable_override_variation" # variable overridden from inside a variation
     VARIABLE_OVERRIDE_RULE = "variable_override_rule" # variable overridden from inside a rule
+    REQUIRED_FEATURES_UNMET = "required_features_unmet"
 
     # Common
     NO_MATCH = "no_match" # no rules matched
@@ -35,6 +36,50 @@ module Featurevisor
 
   # Evaluation module for feature flag evaluation
   module Evaluate
+    def self.required_features_are_matched(requirements, datafile, options)
+      return true if requirements.nil?
+
+      items = requirements.is_a?(Array) ? requirements : [requirements]
+      clean_options = options.reject do |key, _|
+        %i[feature_key variable_key default_variation_value default_variable_value].include?(key)
+      end
+      items.all? do |required|
+        if required.is_a?(String)
+          key = required
+          enabled = true
+          variation = nil
+        elsif required.key?(:feature)
+          key = required[:feature]
+          enabled = required.key?(:enabled) ? required[:enabled] : true
+          variation = required[:variation]
+        else
+          key = required[:key]
+          enabled = true
+          variation = required[:variation]
+        end
+
+        flag = evaluate_with_modules(clean_options.merge(type: "flag", feature_key: key, datafile: datafile))
+        next false unless (flag[:enabled] == true) == enabled
+        next true if variation.nil?
+
+        evaluated_variation = evaluate_with_modules(clean_options.merge(type: "variation", feature_key: key, datafile: datafile))
+        value = evaluated_variation.key?(:variation_value) ? evaluated_variation[:variation_value] : evaluated_variation.dig(:variation, :value)
+        value == variation
+      end
+    end
+
+    def self.variable_override_matches?(override, datafile, context, options)
+      return false unless required_features_are_matched(override[:requiredFeatures], datafile, options)
+
+      conditions_match = !override[:conditions] || datafile.all_conditions_are_matched(
+        datafile.parse_conditions_if_stringified(override[:conditions]), context
+      )
+      segments_match = !override[:segments] || datafile.all_segments_are_matched(
+        datafile.parse_segments_if_stringified(override[:segments]), context
+      )
+      conditions_match && segments_match &&
+        (override.key?(:conditions) || override.key?(:segments) || override.key?(:requiredFeatures))
+    end
 
     # Evaluate with modules
     # @param options [Hash] Evaluation options
@@ -358,39 +403,9 @@ module Featurevisor
         end
 
         # Required
-        if type == "flag" && feature[:required] && feature[:required].length > 0
-          required_features_are_enabled = feature[:required].all? do |required|
-            required_key = nil
-            required_variation = nil
-
-            if required.is_a?(String)
-              required_key = required
-            else
-              required_key = required[:key]
-              required_variation = required[:variation]
-            end
-
-            required_evaluation = evaluate(options.merge(type: "flag", feature_key: required_key))
-            required_is_enabled = required_evaluation[:enabled]
-
-            next false unless required_is_enabled
-
-            if required_variation
-              required_variation_evaluation = evaluate(options.merge(type: "variation", feature_key: required_key))
-
-              required_variation_value = nil
-
-              if has_key?(required_variation_evaluation, :variation_value)
-                required_variation_value = fetch_with_symbol_key(required_variation_evaluation, :variation_value)
-              elsif required_variation_evaluation[:variation]
-                required_variation_value = required_variation_evaluation[:variation][:value]
-              end
-
-              next required_variation_value == required_variation
-            end
-
-            true
-          end
+        required_features = feature[:requiredFeatures] || feature[:required]
+        if type == "flag" && required_features && !Array(required_features).empty?
+          required_features_are_enabled = required_features_are_matched(required_features, datafile, options)
 
           unless required_features_are_enabled
             evaluation = {
@@ -398,6 +413,7 @@ module Featurevisor
               feature_key: feature_key,
               reason: Featurevisor::EvaluationReason::REQUIRED,
               required: feature[:required],
+              required_features: feature[:requiredFeatures],
               enabled: required_features_are_enabled
             }
 
@@ -601,17 +617,7 @@ module Featurevisor
              has_key?(matched_traffic[:variableOverrides], variable_key)
             overrides = fetch_with_symbol_key(matched_traffic[:variableOverrides], variable_key)
 
-            override_index = overrides.find_index do |o|
-              if o[:conditions]
-                conditions = o[:conditions].is_a?(String) && o[:conditions] != "*" ? JSON.parse(o[:conditions]) : o[:conditions]
-                datafile.all_conditions_are_matched(conditions, context)
-              elsif o[:segments]
-                segments = datafile.parse_segments_if_stringified(o[:segments])
-                datafile.all_segments_are_matched(segments, context)
-              else
-                false
-              end
-            end
+            override_index = overrides.find_index { |o| variable_override_matches?(o, datafile, context, options) }
 
             unless override_index.nil?
               override = overrides[override_index]
@@ -627,7 +633,8 @@ module Featurevisor
                 variable_key: variable_key,
                 variable_schema: variable_schema,
                 variable_value: override[:value],
-                variable_override_index: override_index
+                variable_override_index: override_index,
+                variable_override_key: override[:key]
               }
 
               diagnostics.debug("variable override from rule", evaluation)
@@ -675,17 +682,7 @@ module Featurevisor
             if variation && variation[:variableOverrides] && has_key?(variation[:variableOverrides], variable_key)
               overrides = fetch_with_symbol_key(variation[:variableOverrides], variable_key)
 
-              override_index = overrides.find_index do |o|
-                if o[:conditions]
-                  conditions = o[:conditions].is_a?(String) && o[:conditions] != "*" ? JSON.parse(o[:conditions]) : o[:conditions]
-                  datafile.all_conditions_are_matched(conditions, context)
-                elsif o[:segments]
-                  segments = datafile.parse_segments_if_stringified(o[:segments])
-                  datafile.all_segments_are_matched(segments, context)
-                else
-                  false
-                end
-              end
+              override_index = overrides.find_index { |o| variable_override_matches?(o, datafile, context, options) }
 
               unless override_index.nil?
                 override = overrides[override_index]
@@ -700,7 +697,8 @@ module Featurevisor
                   variable_key: variable_key,
                   variable_schema: variable_schema,
                   variable_value: override[:value],
-                  variable_override_index: override_index
+                  variable_override_index: override_index,
+                  variable_override_key: override[:key]
                 }
 
                 diagnostics.debug("variable override from variation", evaluation)

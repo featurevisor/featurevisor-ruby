@@ -1,351 +1,131 @@
 # frozen_string_literal: true
 
 module Featurevisor
-  # Child instance class for managing child contexts and sticky features
+  # Child instance with isolated context and sticky state.
   class ChildInstance
-    # Initialize a new child instance
-    # @param options [Hash] Child instance options
-    # @option options [Instance] :parent Parent instance
-    # @option options [Hash] :context Child context
-    # @option options [Hash] :sticky Child sticky features
     def initialize(options)
       @parent = options[:parent]
       @context = options[:context] || {}
-      @sticky = options[:sticky] || {}
+      @sticky_features = options[:sticky_features] || options[:sticky] || {}
+      @sticky_variables = options[:sticky_variables] || {}
       @emitter = Featurevisor::Emitter.new
       @parent_unsubscribers = []
     end
 
-    # Subscribe to an event
-    # @param event_name [String] Event name
-    # @param callback [Proc] Callback function
-    # @return [Proc] Unsubscribe function
     def on(event_name, callback = nil, &block)
       callback = block if block_given?
-      
-      if event_name == "context_set" || event_name == "sticky_set"
-        @emitter.on(event_name, callback)
-      else
-        parent_unsubscribe = @parent.on(event_name, callback)
-        active = true
-        unsubscribe = nil
-        unsubscribe = proc do
-          next unless active
-
-          active = false
-          parent_unsubscribe.call
-          @parent_unsubscribers.delete(unsubscribe)
-        end
-        @parent_unsubscribers << unsubscribe
-        unsubscribe
+      if %w[context_set sticky_set sticky_features_set sticky_variables_set].include?(event_name)
+        return @emitter.on(event_name, callback)
       end
+
+      parent_unsubscribe = @parent.on(event_name, callback)
+      active = true
+      unsubscribe = nil
+      unsubscribe = proc do
+        next unless active
+
+        active = false
+        parent_unsubscribe.call
+        @parent_unsubscribers.delete(unsubscribe)
+      end
+      @parent_unsubscribers << unsubscribe
+      unsubscribe
     end
 
-    # Close the child instance
     def close
       @parent_unsubscribers.dup.each(&:call)
       @parent_unsubscribers.clear
       @emitter.clear_all
     end
 
-    # Set context
-    # @param context [Hash] Context to set
-    # @param replace [Boolean] Whether to replace existing context
     def set_context(context, replace = false)
-      if replace
-        @context = context
-      else
-        @context = { **@context, **context }
-      end
-
-      @emitter.trigger("context_set", {
-        context: @context,
-        replaced: replace
-      })
+      @context = replace ? context : { **@context, **context }
+      @emitter.trigger("context_set", context: @context, replaced: replace)
     end
 
-    # Get context
-    # @param context [Hash, nil] Additional context to merge
-    # @return [Hash] Merged context
     def get_context(context = nil)
-      @parent.get_context({
-        **@context,
-        **(context || {})
-      })
+      @parent.get_context({ **@context, **(context || {}) })
     end
 
-    # Set sticky features
-    # @param sticky [Hash] Sticky features
-    # @param replace [Boolean] Whether to replace existing sticky features
-    def set_sticky(sticky, replace = false)
-      previous_sticky_features = @sticky || {}
-
-      if replace
-        @sticky = sticky
-      else
-        @sticky = {
-          **@sticky,
-          **sticky
-        }
-      end
-
-      params = Featurevisor::Events.get_params_for_sticky_set_event(previous_sticky_features, @sticky, replace)
+    def set_sticky_features(sticky, replace = false)
+      previous = @sticky_features
+      @sticky_features = replace ? sticky : { **@sticky_features, **sticky }
+      params = Featurevisor::Events.get_params_for_sticky_set_event(previous, @sticky_features, replace)
+      @emitter.trigger("sticky_features_set", params)
       @emitter.trigger("sticky_set", params)
     end
 
-    # Check if a feature is enabled
-    # @param feature_key [String] Feature key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Boolean] True if feature is enabled
+    alias set_sticky set_sticky_features
+
+    def set_sticky_variables(sticky, replace = false)
+      previous = @sticky_variables
+      @sticky_variables = replace ? sticky : { **@sticky_variables, **sticky }
+      @emitter.trigger(
+        "sticky_variables_set",
+        Featurevisor::Events.get_params_for_sticky_variables_set_event(previous, @sticky_variables, replace)
+      )
+    end
+
     def is_enabled(feature_key, context = {}, options = {})
-      @parent.is_enabled(
-        feature_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
+      @parent.is_enabled(feature_key, child_context(context), child_options(options))
     end
 
-    # Evaluate a feature flag and return its full evaluation details.
     def evaluate_flag(feature_key, context = {}, options = {})
-      @parent.evaluate_flag(
-        feature_key,
-        { **@context, **context },
-        { **options, __featurevisor_child_sticky: @sticky }
-      )
+      @parent.evaluate_flag(feature_key, child_context(context), child_options(options))
     end
 
-    # Get variation value
-    # @param feature_key [String] Feature key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [String, nil] Variation value or nil
     def get_variation(feature_key, context = {}, options = {})
-      @parent.get_variation(
-        feature_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
+      @parent.get_variation(feature_key, child_context(context), child_options(options))
     end
 
-    # Evaluate a variation and return its full evaluation details.
     def evaluate_variation(feature_key, context = {}, options = {})
-      @parent.evaluate_variation(
-        feature_key,
-        { **@context, **context },
-        { **options, __featurevisor_child_sticky: @sticky }
-      )
+      @parent.evaluate_variation(feature_key, child_context(context), child_options(options))
     end
 
-    # Get variable value
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Object, nil] Variable value or nil
-    def get_variable(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
+    def get_variable(feature_or_variable_key, variable_key_or_context = nil, context_or_options = {}, options = {})
+      delegate_variable(:get_variable, feature_or_variable_key, variable_key_or_context, context_or_options, options)
     end
 
-    # Evaluate a variable and return its full evaluation details.
-    def evaluate_variable(feature_key, variable_key, context = {}, options = {})
-      @parent.evaluate_variable(
-        feature_key,
-        variable_key,
-        { **@context, **context },
-        { **options, __featurevisor_child_sticky: @sticky }
-      )
+    def evaluate_variable(feature_or_variable_key, variable_key_or_context = nil, context_or_options = {}, options = {})
+      delegate_variable(:evaluate_variable, feature_or_variable_key, variable_key_or_context, context_or_options, options)
     end
 
-    # Get variable as boolean
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Boolean, nil] Boolean value or nil
-    def get_variable_boolean(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_boolean(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
+    %i[boolean string integer double array object json].each do |type|
+      define_method("get_variable_#{type}") do |feature_or_variable_key, variable_key_or_context = nil, context_or_options = {}, options = {}|
+        delegate_variable("get_variable_#{type}".to_sym, feature_or_variable_key, variable_key_or_context, context_or_options, options)
+      end
     end
 
-    # Get variable as string
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [String, nil] String value or nil
-    def get_variable_string(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_string(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
+    def get_feature_evaluations(context = {}, feature_keys = [], options = {})
+      @parent.get_feature_evaluations(child_context(context), feature_keys, child_options(options))
     end
 
-    # Get variable as integer
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Integer, nil] Integer value or nil
-    def get_variable_integer(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_integer(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
-    end
+    alias get_all_evaluations get_feature_evaluations
 
-    # Get variable as double
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Float, nil] Float value or nil
-    def get_variable_double(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_double(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
-    end
-
-    # Get variable as array
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Array, nil] Array value or nil
-    def get_variable_array(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_array(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
-    end
-
-    # Get variable as object
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Hash, nil] Object value or nil
-    def get_variable_object(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_object(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
-    end
-
-    # Get variable as JSON
-    # @param feature_key [String] Feature key
-    # @param variable_key [String] Variable key
-    # @param context [Hash] Context
-    # @param options [Hash] Override options
-    # @return [Object, nil] JSON value or nil
-    def get_variable_json(feature_key, variable_key, context = {}, options = {})
-      @parent.get_variable_json(
-        feature_key,
-        variable_key,
-        {
-          **@context,
-          **context
-        },
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
-    end
-
-    # Get all evaluations
-    # @param context [Hash] Context
-    # @param feature_keys [Array<String>] Feature keys to evaluate
-    # @param options [Hash] Override options
-    # @return [Hash] All evaluations
-    def get_all_evaluations(context = {}, feature_keys = [], options = {})
-      @parent.get_all_evaluations(
-        {
-          **@context,
-          **context
-        },
-        feature_keys,
-        {
-          **options,
-          __featurevisor_child_sticky: @sticky
-        }
-      )
+    def get_variable_evaluations(context = {}, variable_keys = [], options = {})
+      @parent.get_variable_evaluations(child_context(context), variable_keys, child_options(options))
     end
 
     private
+
+    def child_context(context)
+      { **@context, **context }
+    end
+
+    def child_options(options)
+      {
+        **options,
+        __featurevisor_child_sticky_features: @sticky_features,
+        __featurevisor_child_sticky_variables: @sticky_variables
+      }
+    end
+
+    def delegate_variable(method, first, second, third, fourth)
+      if second.nil? || second.is_a?(Hash)
+        @parent.public_send(method, first, child_context(second || {}), child_options(third))
+      else
+        @parent.public_send(method, first, second, child_context(third), child_options(fourth))
+      end
+    end
   end
 end

@@ -190,7 +190,7 @@ RSpec.describe Featurevisor::Emitter do
 
   describe "constants" do
     it "should have correct event names" do
-      expect(Featurevisor::EVENT_NAMES).to eq(%w[datafile_set context_set sticky_set error])
+      expect(Featurevisor::EVENT_NAMES).to eq(%w[datafile_set context_set sticky_set sticky_features_set sticky_variables_set error])
     end
   end
 

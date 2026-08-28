@@ -13,9 +13,11 @@ module Featurevisor
         @name = options[:name]
         @setup = options[:setup]
         @before = options[:before]
+        @before_evaluation = options[:before_evaluation] || options[:beforeEvaluation]
         @bucket_key = options[:bucket_key]
         @bucket_value = options[:bucket_value]
         @after = options[:after]
+        @after_evaluation = options[:after_evaluation] || options[:afterEvaluation]
         @close = options[:close]
       end
 
@@ -27,6 +29,12 @@ module Featurevisor
         return options unless @before
 
         @before.call(options)
+      end
+
+      def call_before_evaluation(options)
+        return options unless @before_evaluation
+
+        @before_evaluation.call(options)
       end
 
       def call_bucket_key(options)
@@ -45,6 +53,12 @@ module Featurevisor
         return evaluation unless @after
 
         @after.call(evaluation, options)
+      end
+
+      def call_after_evaluation(evaluation, options)
+        return evaluation unless @after_evaluation
+
+        @after_evaluation.call(evaluation, options)
       end
 
       def call_close
@@ -124,6 +138,43 @@ module Featurevisor
       end
 
       def run_before_modules(options)
+        result = @modules.reduce(options) do |current, mod|
+          mod.call_before(current)
+        end
+        @modules.reduce(result) do |current, mod|
+          mod.call_before_evaluation(current)
+        end
+      end
+
+      def run_before_evaluation_modules(options)
+        @modules.reduce(options) do |result, mod|
+          mod.call_before_evaluation(result)
+        end
+      end
+
+      def run_after_evaluation_modules(evaluation, options)
+        @modules.reduce(evaluation) do |result, mod|
+          mod.call_after_evaluation(result, options)
+        end
+      end
+
+      def run_after_modules(evaluation, options)
+        result = @modules.reduce(evaluation) do |current, mod|
+          mod.call_after_evaluation(current, options)
+        end
+        @modules.reduce(result) do |current, mod|
+          mod.call_after(current, options)
+        end
+      end
+
+      # Deprecated feature-only callbacks are intentionally excluded here.
+      def run_global_after_modules(evaluation, options)
+        @modules.reduce(evaluation) do |result, mod|
+          mod.call_after_evaluation(result, options)
+        end
+      end
+
+      def run_legacy_before_modules(options)
         @modules.reduce(options) do |result, mod|
           mod.call_before(result)
         end
@@ -143,12 +194,6 @@ module Featurevisor
           bucket_value = mod.call_bucket_value(options.merge(bucket_value: bucket_value))
         end
         bucket_value
-      end
-
-      def run_after_modules(evaluation, options)
-        @modules.reduce(evaluation) do |result, mod|
-          mod.call_after(result, options)
-        end
       end
 
       def close_all

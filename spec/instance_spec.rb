@@ -34,7 +34,7 @@ RSpec.describe "sdk: instance" do
     sdk.set_context(country: "nl")
 
     codes = diagnostics.map { |diagnostic| diagnostic[:code] }
-    expect(codes).to include("datafile_set", "sticky_set", "context_set")
+    expect(codes).to include("datafile_set", "sticky_features_set", "context_set")
   end
 
   it "should configure plain bucketBy" do

@@ -5,7 +5,7 @@ require "json"
 module Featurevisor
   # Private datafile and matching adapter used by the evaluator.
   class InstanceEvaluationDataProvider
-    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :diagnostics, :regex_cache
+    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :variables, :diagnostics, :regex_cache
 
     # Initialize a new evaluation data provider.
     # @param options [Hash] Options hash containing datafile and diagnostics
@@ -20,6 +20,7 @@ module Featurevisor
       @featurevisor_version = datafile[:featurevisorVersion]
       @segments = (datafile[:segments] || {}).transform_keys(&:to_sym)
       @features = (datafile[:features] || {}).transform_keys(&:to_sym)
+      @variables = (datafile[:variables] || {}).transform_keys(&:to_sym)
 
       # Transform nested structures to use symbol keys
       @features.each do |_key, feature|
@@ -72,7 +73,8 @@ module Featurevisor
         revision: @revision,
         featurevisorVersion: @featurevisor_version,
         segments: @segments,
-        features: @features
+        features: @features,
+        variables: @variables
       }.compact
     end
 
@@ -86,6 +88,10 @@ module Featurevisor
 
       segment[:conditions] = parse_conditions_if_stringified(segment[:conditions])
       segment
+    end
+
+    def get_segment_keys
+      @segments.keys
     end
 
     # Get all feature keys
@@ -104,12 +110,18 @@ module Featurevisor
     # Get variable keys for a feature
     # @param feature_key [String] Feature key
     # @return [Array<String>] Array of variable keys
-    def get_variable_keys(feature_key)
+    def get_variable_keys(feature_key = nil)
+      return @variables.keys if feature_key.nil?
+
       feature = get_feature(feature_key)
 
       return [] unless feature
 
       (feature[:variablesSchema] || {}).keys
+    end
+
+    def get_global_variable(variable_key)
+      @variables[variable_key.to_sym] || @variables[variable_key]
     end
 
     # Check if a feature has variations

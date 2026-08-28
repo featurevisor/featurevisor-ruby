@@ -78,6 +78,7 @@ RSpec.describe Featurevisor::Events do
         previousRevision: "1",
         revisionChanged: true,
         features: %i[feature1 feature2],
+        variables: [],
         replaced: false
       })
     end
@@ -106,6 +107,7 @@ RSpec.describe Featurevisor::Events do
         previousRevision: "1",
         revisionChanged: true,
         features: %i[feature2 feature3],
+        variables: [],
         replaced: false
       })
     end
@@ -132,6 +134,7 @@ RSpec.describe Featurevisor::Events do
         previousRevision: "1",
         revisionChanged: true,
         features: %i[feature1 feature2],
+        variables: [],
         replaced: false
       })
     end
