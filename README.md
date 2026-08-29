@@ -950,7 +950,7 @@ The build produces `featurevisor-VERSION.gem` and `featurevisor-openfeature-VERS
 - Run `bundle install`
 - Push commit to `main` branch
 - Wait for CI to complete
-- Tag the release with the same version number, for example `v2.0.0`
+- Tag the release with the same version number, for example `v3.0.0`
 - The workflow verifies that the tag matches the shared version
 - The workflow publishes `featurevisor` first, followed by `featurevisor-openfeature`
 
