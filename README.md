@@ -454,7 +454,7 @@ load_datafile(f, "checkout")
 
 ### Updating datafile
 
-You can set the datafile as many times as you want in your application, which will result in emitting a [`datafile_set`](#datafile_set) event that you can listen and react to accordingly.
+You can set the datafile as many times as you want in your application, which will result in emitting a [`datafile_set`](#datafile-set) event that you can listen and react to accordingly.
 
 The triggers for setting the datafile again can be:
 
@@ -520,7 +520,7 @@ f = Featurevisor.create_featurevisor(
 
 Every diagnostic has `:level`, `:code`, `:message`, and an object-shaped `:details` hash. Optional `:module`, `:moduleName`, and `:originalError` fields describe provenance. Evaluation metadata belongs in `:details`.
 
-Diagnostic handlers are isolated from SDK behavior. An exception in a handler does not stop other handlers or evaluations.
+Diagnostic handlers are isolated from SDK behaviour. An exception in a handler does not stop other handlers or evaluations.
 
 
 ## Events
@@ -635,9 +635,11 @@ And optionally these properties depending on whether you are evaluating a featur
 
 ## Modules
 
-Modules allow you to intercept the evaluation process and customize SDK behavior.
+Modules allow you to intercept the evaluation process and customize SDK behaviour.
 
 For feature evaluations, all `before` callbacks run in registration order, followed by all `before_evaluation` callbacks. After evaluation and caller defaults, all `after_evaluation` callbacks run, followed by all `after` callbacks. Global variable evaluations use only `before_evaluation` and `after_evaluation`. Required feature checks run through the complete module pipeline, and transformed defaults are preserved.
+
+`before` and `after` remain available as deprecated feature-only compatibility callbacks. Use `before_evaluation` and `after_evaluation` for new modules so the same callbacks can handle feature and global variable evaluations.
 
 ### Defining a module
 
@@ -663,8 +665,8 @@ my_custom_module = {
     })
   },
 
-  # before evaluation
-  before: ->(options) {
+  # before feature or global variable evaluation
+  before_evaluation: ->(options) {
     # update context before evaluation
     options[:context] = options[:context].merge({
       someAdditionalAttribute: 'value'
@@ -672,20 +674,14 @@ my_custom_module = {
     options
   },
 
-  # unified callback for feature and global variable evaluations
-  before_evaluation: ->(options) { options },
-
-  # after evaluation
-  after: ->(evaluation, options) {
+  # after feature or global variable evaluation
+  after_evaluation: ->(evaluation, options) {
     reason = evaluation[:reason]
     if reason == 'error'
       # log error
-      return
     end
+    evaluation
   },
-
-  # unified callback for feature and global variable evaluations
-  after_evaluation: ->(evaluation, options) { evaluation },
 
   # configure bucket key
   bucket_key: ->(options) {
@@ -822,7 +818,7 @@ $ bundle exec featurevisor test \
 
 The Ruby test runner builds base datafiles and Target datafiles in memory via `npx featurevisor build --json`. When an assertion contains `target`, it is evaluated against the matching Target datafile.
 
-All three commands accept repeatable `--target=<target>` options. `test` builds only the selected Target datafiles and runs untargeted assertions plus assertions for those targets. `benchmark` and `assess-distribution` run independently against every selected Target datafile. Without `--target`, existing project-wide behavior is preserved. Project definitions, test specs, Target discovery, and datafile generation continue to come from the Node.js CLI.
+All three commands accept repeatable `--target=<target>` options. `test` builds only the selected Target datafiles and runs untargeted assertions plus assertions for those targets. `benchmark` and `assess-distribution` run independently against every selected Target datafile. Without `--target`, existing project-wide behaviour is preserved. Project definitions, test specs, Target discovery, and datafile generation continue to come from the Node.js CLI.
 
 ### Test against local monorepo's example-1
 
