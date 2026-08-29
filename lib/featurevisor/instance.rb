@@ -11,7 +11,8 @@ module Featurevisor
       schemaVersion: "2",
       revision: "unknown",
       segments: {},
-      features: {}
+      features: {},
+      variables: {}
     }.freeze
 
     # Initialize a new Featurevisor instance
@@ -19,7 +20,7 @@ module Featurevisor
     # @option options [Hash, String] :datafile Datafile content or JSON string
     # @option options [Hash] :context Initial context
     # @option options [String] :log_level Log level
-    # @option options [Hash] :sticky Sticky features
+    # @option options [Hash] :sticky_features Sticky features
     # @option options [Array<Hash, FeaturevisorModule>] :modules Array of modules
     # @option options [Proc] :on_diagnostic Diagnostic handler
     def initialize(options = {})
@@ -31,7 +32,8 @@ module Featurevisor
       )
       @on_diagnostic = options[:on_diagnostic] || options[:onDiagnostic]
       @emitter = Featurevisor::Emitter.new
-      @sticky = options[:sticky] || {}
+      @sticky_features = options[:sticky_features] || options[:stickyFeatures] || {}
+      @sticky_variables = options[:sticky_variables] || options[:stickyVariables] || {}
       @closed = false
       @module_diagnostic_subscriptions = []
 
@@ -108,7 +110,8 @@ module Featurevisor
                           end
         unless parsed_datafile.is_a?(Hash) && parsed_datafile[:schemaVersion].is_a?(String) &&
                parsed_datafile[:revision].is_a?(String) && parsed_datafile[:segments].is_a?(Hash) &&
-               parsed_datafile[:features].is_a?(Hash)
+               parsed_datafile[:features].is_a?(Hash) &&
+               (!parsed_datafile.key?(:variables) || parsed_datafile[:variables].is_a?(Hash))
           raise ArgumentError, "Invalid datafile"
         end
         next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile.get_datafile, parsed_datafile)
@@ -140,27 +143,35 @@ module Featurevisor
     # Set sticky features
     # @param sticky [Hash] Sticky features
     # @param replace [Boolean] Whether to replace existing sticky features
-    def set_sticky(sticky, replace = false)
-      previous_sticky_features = @sticky || {}
+    def set_sticky_features(sticky, replace = false)
+      previous_sticky_features = @sticky_features || {}
 
       if replace
-        @sticky = sticky
+        @sticky_features = sticky
       else
-        @sticky = {
-          **@sticky,
+        @sticky_features = {
+          **@sticky_features,
           **sticky
         }
       end
 
-      params = Featurevisor::Events.get_params_for_sticky_set_event(previous_sticky_features, @sticky, replace)
+      params = Featurevisor::Events.get_params_for_sticky_features_set_event(previous_sticky_features, @sticky_features, replace)
 
       report_diagnostic(
         level: "info",
-        code: "sticky_set",
+        code: "sticky_features_set",
         message: "Sticky features set",
         details: params
       )
-      @emitter.trigger("sticky_set", params)
+      @emitter.trigger("sticky_features_set", params)
+    end
+
+    def set_sticky_variables(sticky, replace = false)
+      previous = @sticky_variables || {}
+      @sticky_variables = replace ? sticky : { **@sticky_variables, **sticky }
+      params = Featurevisor::Events.get_params_for_sticky_variables_set_event(previous, @sticky_variables, replace)
+      report_diagnostic(level: "info", code: "sticky_variables_set", message: "Sticky variables set", details: params)
+      @emitter.trigger("sticky_variables_set", params)
     end
 
     # Get the revision
@@ -181,7 +192,7 @@ module Featurevisor
       @datafile.get_feature_keys
     end
 
-    def get_variable_keys(feature_key)
+    def get_variable_keys(feature_key = nil)
       @datafile.get_variable_keys(feature_key)
     end
 
@@ -275,7 +286,8 @@ module Featurevisor
       Featurevisor::ChildInstance.new(
         parent: self,
         context: get_context(context),
-        sticky: options[:sticky]
+        sticky_features: options[:sticky_features] || options[:stickyFeatures],
+        sticky_variables: options[:sticky_variables] || options[:stickyVariables]
       )
     end
 
@@ -350,12 +362,17 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Hash] Evaluation result
-    def evaluate_variable(feature_key, variable_key, context = {}, options = {})
+    def evaluate_variable(feature_or_variable_key, variable_key_or_context = nil, context_or_options = {}, options = {})
+      if variable_key_or_context.nil? || variable_key_or_context.is_a?(Hash)
+        context = variable_key_or_context || {}
+        return evaluate_variable_without_feature(feature_or_variable_key, context, context_or_options)
+      end
+
       Featurevisor::Evaluate.evaluate_with_modules(
-        get_evaluation_dependencies(context, options).merge(
+        get_evaluation_dependencies(context_or_options, options).merge(
           type: "variable",
-          feature_key: feature_key,
-          variable_key: variable_key
+          feature_key: feature_or_variable_key,
+          variable_key: variable_key_or_context
         )
       )
     end
@@ -366,13 +383,13 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Object, nil] Variable value or nil
-    def get_variable(feature_key, variable_key, context = {}, options = {})
+    def get_variable(feature_or_variable_key, variable_key_or_context = nil, context_or_options = {}, options = {})
       begin
-        evaluation = evaluate_variable(feature_key, variable_key, context, options)
+        evaluation = evaluate_variable(feature_or_variable_key, variable_key_or_context, context_or_options, options)
 
         if evaluation.key?(:variable_value)
-          if evaluation[:variable_schema] &&
-             evaluation[:variable_schema][:type] == "json" &&
+          variable_type = evaluation.dig(:variable_schema, :type) || evaluation.dig(:variable, :type)
+          if variable_type == "json" &&
              evaluation[:variable_value].is_a?(String)
             JSON.parse(evaluation[:variable_value], symbolize_names: true)
           else
@@ -382,7 +399,7 @@ module Featurevisor
           nil
         end
       rescue => e
-        report_diagnostic(level: "error", code: "evaluation_error", message: "getVariable failed", originalError: e, details: { featureKey: feature_key, variableKey: variable_key })
+        report_diagnostic(level: "error", code: "evaluation_error", message: "getVariable failed", originalError: e, details: { variableKey: variable_key_or_context || feature_or_variable_key })
         nil
       end
     end
@@ -393,8 +410,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Boolean, nil] Boolean value or nil
-    def get_variable_boolean(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_boolean(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "boolean")
     end
 
@@ -404,8 +421,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [String, nil] String value or nil
-    def get_variable_string(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_string(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "string")
     end
 
@@ -415,8 +432,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Integer, nil] Integer value or nil
-    def get_variable_integer(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_integer(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "integer")
     end
 
@@ -426,8 +443,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Float, nil] Float value or nil
-    def get_variable_double(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_double(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "double")
     end
 
@@ -437,8 +454,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Array, nil] Array value or nil
-    def get_variable_array(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_array(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "array")
     end
 
@@ -448,8 +465,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Hash, nil] Object value or nil
-    def get_variable_object(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_object(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "object")
     end
 
@@ -459,8 +476,8 @@ module Featurevisor
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Object, nil] JSON value or nil
-    def get_variable_json(feature_key, variable_key, context = {}, options = {})
-      variable_value = get_variable(feature_key, variable_key, context, options)
+    def get_variable_json(*args)
+      variable_value = get_variable(*args)
       get_value_by_type(variable_value, "json")
     end
 
@@ -469,7 +486,7 @@ module Featurevisor
     # @param feature_keys [Array<String>] Feature keys to evaluate
     # @param options [Hash] Override options
     # @return [Hash] All evaluations
-    def get_all_evaluations(context = {}, feature_keys = [], options = {})
+    def get_feature_evaluations(context = {}, feature_keys = [], options = {})
       result = {}
 
       keys = feature_keys.size > 0 ? feature_keys : @datafile.get_feature_keys
@@ -510,7 +527,99 @@ module Featurevisor
       result
     end
 
+    def get_variable_evaluations(context = {}, variable_keys = [], options = {})
+      keys = variable_keys.empty? ? @datafile.get_variable_keys : variable_keys
+      keys.to_h { |key| [key, get_variable(key.to_s, context, options)] }
+    end
+
     private
+
+    def evaluate_variable_without_feature(variable_key, context = {}, options = {})
+      evaluation_options = {
+        type: "variable",
+        variable_key: variable_key.to_s,
+        context: get_context(context)
+      }
+      evaluation_options[:default_variable_value] = options[:default_variable_value] if options.key?(:default_variable_value)
+      begin
+        evaluation_options = @modules_manager.run_before_evaluation_modules(evaluation_options)
+        resolved_key = evaluation_options[:variable_key]
+        variable = @datafile.get_global_variable(resolved_key)
+        sticky = options[:__featurevisor_child_sticky_variables] || @sticky_variables
+        evaluation = { type: "variable", variable_key: resolved_key, reason: Featurevisor::EvaluationReason::VARIABLE_NOT_FOUND }
+
+        if sticky.key?(resolved_key) || sticky.key?(resolved_key.to_sym)
+          sticky_value = sticky.key?(resolved_key) ? sticky[resolved_key] : sticky[resolved_key.to_sym]
+          evaluation.merge!(reason: Featurevisor::EvaluationReason::STICKY, variable: variable,
+                            variable_value: sticky_value)
+        elsif variable
+          unless required_features_are_matched(variable[:requiredFeatures], evaluation_options[:context], options)
+            value_key = variable[:useDefaultWhenDisabled] ? :defaultValue : :disabledValue
+            evaluation.merge!(reason: Featurevisor::EvaluationReason::REQUIRED_FEATURES_UNMET,
+                              variable: variable)
+            evaluation[:variable_value] = variable[value_key] if variable.key?(value_key)
+          else
+            (variable[:overrides] || []).each_with_index do |override, index|
+              next unless required_features_are_matched(override[:requiredFeatures], evaluation_options[:context], options)
+              conditions_match = !override[:conditions] || @datafile.all_conditions_are_matched(
+                @datafile.parse_conditions_if_stringified(override[:conditions]), evaluation_options[:context]
+              )
+              segments_match = !override[:segments] || @datafile.all_segments_are_matched(
+                @datafile.parse_segments_if_stringified(override[:segments]), evaluation_options[:context]
+              )
+              next unless conditions_match && segments_match
+
+              evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE,
+                                variable: variable,
+                                variable_override_index: index, variable_override_key: override[:key],
+                                variable_override_path: override[:keyPath])
+              evaluation[:variable_value] = override[:value] if override.key?(:value)
+              break
+            end
+            if evaluation[:reason] == Featurevisor::EvaluationReason::VARIABLE_NOT_FOUND
+              evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_DEFAULT,
+                                variable: variable)
+              evaluation[:variable_value] = variable[:defaultValue] if variable.key?(:defaultValue)
+            end
+          end
+          report_diagnostic(level: "warn", code: "variable_deprecated", message: "Variable \"#{resolved_key}\" is deprecated",
+                            details: { variableKey: resolved_key, evaluation: evaluation }) if variable[:deprecated]
+        end
+
+        if !evaluation.key?(:variable_value) && evaluation_options.key?(:default_variable_value)
+          evaluation[:variable_value] = evaluation_options[:default_variable_value]
+        end
+        evaluation = @modules_manager.run_global_after_modules(evaluation, evaluation_options)
+        report_diagnostic(level: "debug", code: evaluation[:reason], message: "Global variable evaluated", details: evaluation)
+        evaluation
+      rescue => e
+        evaluation = { type: "variable", variable_key: evaluation_options[:variable_key],
+                       reason: Featurevisor::EvaluationReason::ERROR, error: e }
+        report_diagnostic(level: "error", code: "evaluation_error", message: "Global variable evaluation failed",
+                          originalError: e, details: evaluation)
+        evaluation
+      end
+    end
+
+    def required_features_are_matched(requirements, context, options)
+      return true if requirements.nil?
+
+      items = requirements.is_a?(Array) ? requirements : [requirements]
+      clean_options = options.reject { |key, _| %i[default_variation_value default_variable_value].include?(key) }
+      items.all? do |required|
+        if required.is_a?(String)
+          key = required
+          expected_enabled = true
+          expected_variation = nil
+        else
+          key = required[:feature]
+          expected_enabled = required.key?(:enabled) ? required[:enabled] : true
+          expected_variation = required[:variation]
+        end
+        next false unless is_enabled(key, context, clean_options) == expected_enabled
+        expected_variation.nil? || get_variation(key, context, clean_options) == expected_variation
+      end
+    end
 
     # Get evaluation dependencies
     # @param context [Hash] Context
@@ -522,7 +631,8 @@ module Featurevisor
         diagnostics: @diagnostics,
         modules_manager: @modules_manager,
         datafile: @datafile,
-        sticky: options[:__featurevisor_child_sticky] || @sticky,
+        sticky: options[:__featurevisor_child_sticky_features] || @sticky_features,
+        sticky_variables: options[:__featurevisor_child_sticky_variables] || @sticky_variables,
       }.tap do |dependencies|
         dependencies[:default_variation_value] = options[:default_variation_value] if options.key?(:default_variation_value)
         dependencies[:default_variable_value] = options[:default_variable_value] if options.key?(:default_variable_value)
@@ -573,6 +683,10 @@ module Featurevisor
         features: {
           **(previous[:features] || {}),
           **(incoming[:features] || {})
+        },
+        variables: {
+          **(previous[:variables] || {}),
+          **(incoming[:variables] || {})
         }
       }.compact
     end

@@ -32,7 +32,7 @@ RSpec.describe FeaturevisorCLI do
     end
 
     it "shows benchmark environment requirement note" do
-      expect { FeaturevisorCLI.show_help }.to output(/Note: benchmark command requires --environment and --feature options/).to_stdout
+      expect { FeaturevisorCLI.show_help }.to output(/Note: benchmark requires --environment and either --feature or --variable/).to_stdout
     end
   end
 end

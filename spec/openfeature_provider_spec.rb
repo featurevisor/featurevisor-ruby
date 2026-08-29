@@ -17,6 +17,10 @@ RSpec.describe Featurevisor::OpenFeatureProvider do
           force: [{ conditions: { attribute: "userId", operator: "equals", value: "forced-user" }, enabled: true, variation: "on" }],
           traffic: [{ key: "all", segments: "*", percentage: 100_000, variation: "on" }]
         }
+      },
+      variables: {
+        welcomeMessage: { type: "string", defaultValue: "Welcome" },
+        globalEnabled: { type: "boolean", defaultValue: true }
       }
     }
   end
@@ -43,6 +47,20 @@ RSpec.describe Featurevisor::OpenFeatureProvider do
     expect(provider.fetch_object_value(flag_key: "checkout:items", default_value: [], evaluation_context: context).value).to eq(["a"])
     expect(provider.fetch_object_value(flag_key: "checkout:config", default_value: {}, evaluation_context: context).value).to eq({ "color" => "blue" })
     expect(provider.fetch_object_value(flag_key: "checkout:json", default_value: {}, evaluation_context: context).value).to eq({ "nested" => true })
+    expect(provider.fetch_string_value(flag_key: "variable:welcomeMessage", default_value: "fallback", evaluation_context: context).value).to eq("Welcome")
+    expect(provider.fetch_boolean_value(flag_key: "variable:globalEnabled", default_value: false, evaluation_context: context).value).to be(true)
+  end
+
+  it "supports a custom global variable prefix" do
+    instance = provider(key_separator: "/", global_variable_prefix: "$global")
+    expect(instance.fetch_string_value(flag_key: "$global/welcomeMessage", default_value: "fallback").value).to eq("Welcome")
+    expect(instance.fetch_string_value(flag_key: "variable/welcomeMessage", default_value: "fallback").error_code).to eq(OpenFeature::SDK::Provider::ErrorCode::FLAG_NOT_FOUND)
+  ensure
+    instance&.shutdown
+  end
+
+  it "rejects a global variable prefix containing the separator" do
+    expect { provider(global_variable_prefix: "global:value") }.to raise_error(ArgumentError)
   end
 
   it "supports errors, custom grammar, tracking, and shutdown" do
@@ -147,6 +165,7 @@ RSpec.describe Featurevisor::OpenFeatureProvider do
     "disabled" => OpenFeature::SDK::Provider::Reason::DISABLED,
     "variation_disabled" => OpenFeature::SDK::Provider::Reason::DISABLED,
     "variable_disabled" => OpenFeature::SDK::Provider::Reason::DISABLED,
+    "required_features_unmet" => OpenFeature::SDK::Provider::Reason::DISABLED,
     "out_of_range" => OpenFeature::SDK::Provider::Reason::DEFAULT,
     "no_match" => OpenFeature::SDK::Provider::Reason::DEFAULT,
     "variable_default" => OpenFeature::SDK::Provider::Reason::DEFAULT

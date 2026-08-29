@@ -235,10 +235,12 @@ module FeaturevisorCLI
 
       def create_tester_instance(datafile, level, assertion)
         sticky = parse_sticky(assertion[:sticky])
+        sticky_variables = assertion[:stickyVariables].is_a?(Hash) ? assertion[:stickyVariables] : {}
 
         Featurevisor.create_featurevisor(
           datafile: datafile,
-          sticky: sticky,
+          sticky_features: sticky,
+          sticky_variables: sticky_variables,
           log_level: level,
           modules: [
             {
@@ -265,7 +267,7 @@ module FeaturevisorCLI
         tests.each do |test|
           test_key = test[:key]
           assertions = test[:assertions] || []
-          if test[:feature] && !@options.targets.empty?
+          if (test[:feature] || test[:variable]) && !@options.targets.empty?
             assertions = assertions.select do |assertion|
               assertion[:target].nil? || @options.targets.include?(assertion[:target])
             end
@@ -300,6 +302,14 @@ module FeaturevisorCLI
                   end
 
                   test_result = run_test_feature(assertion, test[:feature], instance, level)
+                end
+              elsif test[:variable]
+                datafile = resolve_datafile_for_assertion(assertion, datafiles_by_key)
+                if datafile
+                  instance = create_tester_instance(datafile, level, assertion)
+                  test_result = run_test_variable(assertion, test[:variable], instance)
+                else
+                  test_result = { has_error: true, errors: "      ✘ no datafile found for assertion target/environment combination\n", duration: 0 }
                 end
               elsif test[:segment]
                 segment_key = test[:segment]
@@ -347,6 +357,31 @@ module FeaturevisorCLI
         end
       end
 
+      def run_test_variable(assertion, variable_key, instance)
+        context = parse_context(assertion[:context])
+        options = {}
+        options[:default_variable_value] = assertion[:defaultVariableValue] if assertion.key?(:defaultVariableValue)
+        started = Time.now
+        errors = ""
+
+        if assertion.key?(:expectedValue)
+          actual = instance.get_variable(variable_key, context, options)
+          unless compare_values(actual, assertion[:expectedValue])
+            errors += "      ✘ expectedValue: expected #{assertion[:expectedValue].inspect} but received #{actual.inspect}\n"
+          end
+        end
+
+        if assertion[:expectedEvaluation].is_a?(Hash)
+          evaluation = instance.evaluate_variable(variable_key, context, options)
+          assertion[:expectedEvaluation].each do |key, expected|
+            actual = get_evaluation_value(evaluation, key)
+            errors += "      ✘ expectedEvaluation.#{key}: expected #{expected.inspect} but received #{actual.inspect}\n" unless compare_values(actual, expected)
+          end
+        end
+
+        { has_error: !errors.empty?, errors: errors, duration: Time.now - started }
+      end
+
       def run_test_feature(assertion, feature_key, instance, level)
         context = parse_context(assertion[:context])
         sticky = parse_sticky(assertion[:sticky])
@@ -354,7 +389,7 @@ module FeaturevisorCLI
         # Set context and sticky for this assertion
         instance.set_context(context, false)
         if sticky && !sticky.empty?
-          instance.set_sticky(sticky, false)
+          instance.set_sticky_features(sticky, false)
         end
 
         # Create override options
@@ -492,7 +527,7 @@ module FeaturevisorCLI
               # Create a local copy to ensure it's never nil
               child_sticky = sticky || {}
               if !child_sticky.empty?
-                child_instance.set_sticky(child_sticky, false)
+                child_instance.set_sticky_features(child_sticky, false)
               end
 
               child_result = run_test_feature_child(child, feature_key, child_instance, level)
@@ -795,6 +830,8 @@ module FeaturevisorCLI
           evaluation[:force]
         when :required
           evaluation[:required]
+        when :requiredFeatures
+          evaluation[:required_features]
         when :sticky
           evaluation[:sticky]
         when :variation
@@ -809,6 +846,10 @@ module FeaturevisorCLI
           evaluation[:variable_schema]
         when :variableOverrideIndex
           evaluation[:variable_override_index]
+        when :variableOverrideKey
+          evaluation[:variable_override_key]
+        when :variableOverridePath
+          evaluation[:variable_override_path]
         else
           nil
         end

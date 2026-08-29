@@ -11,13 +11,15 @@ module Featurevisor
 
     attr_reader :metadata, :featurevisor
 
-    def initialize(options = {}, featurevisor: nil, targeting_key_field: "userId", key_separator: ":", variation_key: "variation", on_track: nil, **featurevisor_options)
+    def initialize(options = {}, featurevisor: nil, targeting_key_field: "userId", key_separator: ":", variation_key: "variation", global_variable_prefix: "variable", on_track: nil, **featurevisor_options)
       raise ArgumentError, "options must be a Hash" unless options.is_a?(Hash)
 
       @metadata = Provider::ProviderMetadata.new(name: "Featurevisor").freeze
       @targeting_key_field = targeting_key_field.empty? ? "userId" : targeting_key_field
       @key_separator = key_separator.empty? ? ":" : key_separator
       @variation_key = variation_key.empty? ? "variation" : variation_key
+      @global_variable_prefix = global_variable_prefix.empty? ? "variable" : global_variable_prefix
+      raise ArgumentError, "global_variable_prefix cannot contain key_separator" if @global_variable_prefix.include?(@key_separator)
       @on_track = on_track
       @datafile_error = nil
       @shutdown = false
@@ -86,7 +88,10 @@ module Featurevisor
       targeting_key = evaluation_context&.targeting_key
       context[@targeting_key_field] = targeting_key if targeting_key && !targeting_key.empty?
 
-      if selector.nil? || selector.empty?
+      if feature_key == @global_variable_prefix && selector && !selector.empty?
+        evaluation = featurevisor.evaluate_variable(selector, context)
+        value = evaluation[:variable_value]
+      elsif selector.nil? || selector.empty?
         return type_mismatch(flag_key, default_value, expected_type) unless expected_type == :boolean
         evaluation = featurevisor.evaluate_flag(feature_key, context)
         value = evaluation[:enabled]
@@ -96,7 +101,8 @@ module Featurevisor
       else
         evaluation = featurevisor.evaluate_variable(feature_key, selector, context)
         value = evaluation[:variable_value]
-        if evaluation.dig(:variable_schema, :type) == "json" && value.is_a?(String)
+        variable_type = evaluation.dig(:variable_schema, :type) || evaluation.dig(:variable, :type)
+        if variable_type == "json" && value.is_a?(String)
           begin
             value = JSON.parse(value)
           rescue JSON::ParserError
@@ -127,10 +133,10 @@ module Featurevisor
 
     def metadata_for(evaluation)
       metadata = {
-        "featureKey" => evaluation[:feature_key],
         "featurevisorReason" => evaluation[:reason],
         "schemaVersion" => featurevisor.get_schema_version
       }
+      metadata["featureKey"] = evaluation[:feature_key] unless evaluation[:feature_key].nil?
       metadata["revision"] = featurevisor.get_revision if featurevisor.get_revision
       {
         variable_key: "variableKey",
@@ -138,7 +144,9 @@ module Featurevisor
         bucket_key: "bucketKey",
         bucket_value: "bucketValue",
         force_index: "forceIndex",
-        variable_override_index: "variableOverrideIndex"
+        variable_override_index: "variableOverrideIndex",
+        variable_override_key: "variableOverrideKey",
+        variable_override_path: "variableOverridePath"
       }.each do |key, metadata_key|
         metadata[metadata_key] = evaluation[key] unless evaluation[key].nil?
       end
@@ -149,7 +157,7 @@ module Featurevisor
       return Provider::Reason::ERROR if %w[feature_not_found variable_not_found no_variations error].include?(value)
       return Provider::Reason::TARGETING_MATCH if %w[required forced sticky rule variable_override_variation variable_override_rule].include?(value)
       return Provider::Reason::SPLIT if value == "allocated"
-      return Provider::Reason::DISABLED if %w[disabled variation_disabled variable_disabled].include?(value)
+      return Provider::Reason::DISABLED if %w[disabled variation_disabled variable_disabled required_features_unmet].include?(value)
       Provider::Reason::DEFAULT
     end
 
@@ -162,7 +170,10 @@ module Featurevisor
     def error_message(evaluation)
       return evaluation[:error].message if evaluation[:error].respond_to?(:message)
       return %(Feature "#{evaluation[:feature_key]}" was not found) if evaluation[:reason] == "feature_not_found"
-      return %(Variable "#{evaluation[:variable_key]}" was not found for feature "#{evaluation[:feature_key]}") if evaluation[:reason] == "variable_not_found"
+      if evaluation[:reason] == "variable_not_found"
+        return %(Variable "#{evaluation[:variable_key]}" was not found) unless evaluation[:feature_key]
+        return %(Variable "#{evaluation[:variable_key]}" was not found for feature "#{evaluation[:feature_key]}")
+      end
       return %(Feature "#{evaluation[:feature_key]}" has no variations) if evaluation[:reason] == "no_variations"
       "Featurevisor evaluation failed"
     end

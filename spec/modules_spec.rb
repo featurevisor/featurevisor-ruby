@@ -279,6 +279,29 @@ RSpec.describe Featurevisor::Modules do
       expect(result[:original]).to be true
     end
 
+    it "runs canonical module phases in order" do
+      order = []
+      %w[first second].each do |name|
+        modules_manager.add(Featurevisor::Modules::FeaturevisorModule.new(
+          name: name,
+          before: ->(options) { order << "before:#{name}"; options },
+          before_evaluation: ->(options) { order << "beforeEvaluation:#{name}"; options },
+          after_evaluation: ->(evaluation, _options) { order << "afterEvaluation:#{name}"; evaluation },
+          after: ->(evaluation, _options) { order << "after:#{name}"; evaluation }
+        ))
+      end
+
+      options = modules_manager.run_before_modules(type: "flag", feature_key: "test")
+      modules_manager.run_after_modules({ type: "flag", feature_key: "test" }, options)
+
+      expect(order).to eq([
+        "before:first", "before:second",
+        "beforeEvaluation:first", "beforeEvaluation:second",
+        "afterEvaluation:first", "afterEvaluation:second",
+        "after:first", "after:second"
+      ])
+    end
+
     it "should initialize with existing modules" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(name: "test-mod")
       manager = Featurevisor::Modules::ModulesManager.new(modules: [mod], diagnostics: diagnostics)

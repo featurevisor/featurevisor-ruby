@@ -22,8 +22,8 @@ module FeaturevisorCLI
           exit 1
         end
 
-        unless @options.feature
-          puts "Error: --feature is required for benchmark command"
+        unless @options.feature || @options.variable
+          puts "Error: --feature or --variable is required for benchmark command"
           exit 1
         end
 
@@ -41,7 +41,8 @@ module FeaturevisorCLI
         datafile_build_duration_ms = (datafile_build_duration * 1000).round
 
         puts "\nBenchmark Featurevisor feature"
-        puts "  Feature: #{@options.feature}"
+        puts "  Feature: #{@options.feature}" if @options.feature
+        puts "  Global variable: #{@options.variable}" if @options.variable && !@options.feature
         puts "  Environment: #{@options.environment}"
         puts "  Target: #{target}" if target
         puts "  Iterations: #{@options.n}"
@@ -59,7 +60,10 @@ module FeaturevisorCLI
         puts "Against context: #{context.to_json}"
 
         # Run the appropriate benchmark
-        if @options.variation
+        if @options.variable && !@options.feature
+          puts "Evaluating global variable \"#{@options.variable}\" #{@options.n} times..."
+          output = benchmark_global_variable(instance, @options.variable, context, @options.n)
+        elsif @options.variation
           puts "Evaluating variation #{@options.n} times..."
           output = benchmark_feature_variation(instance, @options.feature, context, @options.n)
         elsif @options.variable
@@ -220,6 +224,12 @@ module FeaturevisorCLI
       def benchmark_feature_variable(instance, feature_key, variable_key, context, n)
         benchmark_evaluation(n) do
           instance.get_variable(feature_key, variable_key, context)
+        end
+      end
+
+      def benchmark_global_variable(instance, variable_key, context, n)
+        benchmark_evaluation(n) do
+          instance.get_variable(variable_key, context)
         end
       end
 

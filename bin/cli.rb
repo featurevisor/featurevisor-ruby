@@ -43,7 +43,7 @@ module FeaturevisorCLI
           options.environment = v
         end
 
-        opts.on("--feature=FEATURE", "Feature key (required for benchmark)") do |v|
+        opts.on("--feature=FEATURE", "Feature key") do |v|
           options.feature = v
         end
 
@@ -150,6 +150,6 @@ module FeaturevisorCLI
     puts "  featurevisor benchmark --feature=myFeature --environment=dev --n=10000"
     puts "  featurevisor assess-distribution --feature=myFeature --n=10000"
     puts ""
-    puts "Note: benchmark command requires --environment and --feature options"
+    puts "Note: benchmark requires --environment and either --feature or --variable"
   end
 end

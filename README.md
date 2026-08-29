@@ -19,8 +19,9 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 - [Getting variation](#getting-variation)
 - [Getting variables](#getting-variables)
   - [Type specific methods](#type-specific-methods)
-- [Getting all evaluations](#getting-all-evaluations)
-- [Sticky](#sticky)
+- [Getting global variables](#getting-global-variables)
+- [Getting aggregate evaluations](#getting-aggregate-evaluations)
+- [Sticky features and variables](#sticky-features-and-variables)
   - [Initialize with sticky](#initialize-with-sticky)
   - [Set sticky afterwards](#set-sticky-afterwards)
 - [Setting datafile](#setting-datafile)
@@ -36,7 +37,7 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 - [Events](#events)
   - [`datafile_set`](#datafile_set)
   - [`context_set`](#context_set)
-  - [`sticky_set`](#sticky_set)
+  - [`sticky_features_set` and `sticky_variables_set`](#sticky_features_set-and-sticky_variables_set)
   - [`error`](#error)
 - [Modules](#modules)
   - [Defining a module](#defining-a-module)
@@ -89,7 +90,7 @@ f = Featurevisor.create_featurevisor(
 
 Most applications only need this factory and the returned `Featurevisor::Instance`. Public extension and observability APIs include modules, diagnostics, events, and the datafile structures accepted by the factory.
 
-Concurrent evaluations are safe after an instance is configured. Do not mutate or close the same instance concurrently with evaluations. Serialize calls to `set_datafile`, `set_context`, `set_sticky`, `add_module`, `remove_module`, and `close`. Module, event, and diagnostic callbacks must synchronize mutable state that they capture.
+Concurrent evaluations are safe after an instance is configured. Do not mutate or close the same instance concurrently with evaluations. Serialize calls to `set_datafile`, `set_context`, `set_sticky_features`, `set_sticky_variables`, `add_module`, `remove_module`, and `close`. Module, event, and diagnostic callbacks must synchronize mutable state that they capture.
 
 ## Initialization
 
@@ -295,12 +296,24 @@ f.get_variable_json(feature_key, variable_key, context = {})
 
 Type specific methods do not coerce values. `get_variable_integer` returns `nil` for the string `"1"`, and boolean getters return `nil` for non-boolean values.
 
-## Getting all evaluations
+## Getting global variables
+
+Global variables use the same methods with a single variable key:
+
+```ruby
+message = f.get_variable_string('welcomeMessage', context)
+value = f.get_variable('checkoutSettings', context)
+evaluation = f.evaluate_variable('checkoutSettings', context)
+```
+
+Global variables resolve sticky values first, then required features, then the first matching override, and finally their default value.
+
+## Getting aggregate evaluations
 
 You can get evaluations of all features available in the SDK instance:
 
 ```ruby
-all_evaluations = f.get_all_evaluations({})
+all_evaluations = f.get_feature_evaluations({})
 
 puts all_evaluations
 # {
@@ -321,11 +334,17 @@ puts all_evaluations
 
 This is handy especially when you want to pass all evaluations from a backend application to the frontend.
 
-## Sticky
+Global variable values are available separately:
+
+```ruby
+global_variables = f.get_variable_evaluations({})
+```
+
+## Sticky features and variables
 
 For the lifecycle of the SDK instance in your application, you can set some features with sticky values, meaning that they will not be evaluated against the fetched [datafile](https://featurevisor.com/docs/building-datafiles/):
 
-Sticky values belong to an SDK or child instance. Evaluation options do not accept sticky overrides; use `spawn(context, sticky: ...)` when a child needs its own sticky state.
+Sticky values belong to an SDK or child instance. Feature and global variable sticky values are independent.
 
 ### Initialize with sticky
 
@@ -333,7 +352,7 @@ Sticky values belong to an SDK or child instance. Evaluation options do not acce
 require 'featurevisor'
 
 f = Featurevisor.create_featurevisor(
-  sticky: {
+  sticky_features: {
     myFeatureKey: {
       enabled: true,
       # optional
@@ -345,6 +364,9 @@ f = Featurevisor.create_featurevisor(
     anotherFeatureKey: {
       enabled: false
     }
+  },
+  sticky_variables: {
+    welcomeMessage: 'Welcome back'
   }
 )
 ```
@@ -356,7 +378,7 @@ Once initialized with sticky features, the SDK will look for values there first 
 You can also set sticky features after the SDK is initialized:
 
 ```ruby
-f.set_sticky({
+f.set_sticky_features({
   myFeatureKey: {
     enabled: true,
     variation: 'treatment',
@@ -368,6 +390,8 @@ f.set_sticky({
     enabled: false
   }
 }, true) # replace existing sticky features (false by default)
+
+f.set_sticky_variables({ welcomeMessage: 'Welcome back' }, true)
 ```
 
 ## Setting datafile
@@ -393,7 +417,7 @@ By default, `set_datafile(datafile)` merges the incoming datafile into the SDK's
 - `segments` are merged, with incoming entries overriding existing ones
 - `features` are merged, with incoming entries overriding existing ones
 
-This means you can call `set_datafile` more than once with different datafiles, and the SDK instance accumulates their features and segments together.
+This means you can call `set_datafile` more than once with different datafiles, and the SDK instance accumulates their features, segments, and global variables together.
 
 ### Replacing
 
@@ -545,14 +569,18 @@ unsubscribe = f.on('context_set') do |event|
 end
 ```
 
-### `sticky_set`
+### `sticky_features_set` and `sticky_variables_set`
 
 ```ruby
-unsubscribe = f.on('sticky_set') do |event|
+feature_unsubscribe = f.on('sticky_features_set') do |event|
   replaced = event[:replaced] # true if sticky features got replaced
   features = event[:features] # list of all affected feature keys
 
   puts 'Sticky features set'
+end
+
+variable_unsubscribe = f.on('sticky_variables_set') do |event|
+  variables = event[:variables]
 end
 ```
 
@@ -583,11 +611,14 @@ evaluation = f.evaluate_variation(feature_key, context = {})
 
 # variable
 evaluation = f.evaluate_variable(feature_key, variable_key, context = {})
+
+# global variable
+global_evaluation = f.evaluate_variable(variable_key, context = {})
 ```
 
 The returned object will always contain the following properties:
 
-- `feature_key`: the feature key
+- `feature_key`: the feature key when evaluating a feature
 - `reason`: the reason how the value was evaluated
 
 And optionally these properties depending on whether you are evaluating a feature variation or a variable:
@@ -605,6 +636,8 @@ And optionally these properties depending on whether you are evaluating a featur
 ## Modules
 
 Modules allow you to intercept the evaluation process and customize SDK behavior.
+
+For feature evaluations, all `before` callbacks run in registration order, followed by all `before_evaluation` callbacks. After evaluation and caller defaults, all `after_evaluation` callbacks run, followed by all `after` callbacks. Global variable evaluations use only `before_evaluation` and `after_evaluation`. Required feature checks run through the complete module pipeline, and transformed defaults are preserved.
 
 ### Defining a module
 
@@ -639,6 +672,9 @@ my_custom_module = {
     options
   },
 
+  # unified callback for feature and global variable evaluations
+  before_evaluation: ->(options) { options },
+
   # after evaluation
   after: ->(evaluation, options) {
     reason = evaluation[:reason]
@@ -647,6 +683,9 @@ my_custom_module = {
       return
     end
   },
+
+  # unified callback for feature and global variable evaluations
+  after_evaluation: ->(evaluation, options) { evaluation },
 
   # configure bucket key
   bucket_key: ->(options) {
@@ -720,12 +759,14 @@ Now you can pass the child instance where your individual request is being handl
 is_enabled = child_f.is_enabled('my_feature')
 variation = child_f.get_variation('my_feature')
 variable_value = child_f.get_variable('my_feature', 'my_variable')
+global_value = child_f.get_variable('welcomeMessage')
 ```
 
 Similar to parent SDK, child instances also support several additional methods:
 
 - `set_context`
-- `set_sticky`
+- `set_sticky_features`
+- `set_sticky_variables`
 - `evaluate_flag`
 - `is_enabled`
 - `evaluate_variation`
@@ -739,7 +780,8 @@ Similar to parent SDK, child instances also support several additional methods:
 - `get_variable_array`
 - `get_variable_object`
 - `get_variable_json`
-- `get_all_evaluations`
+- `get_feature_evaluations`
+- `get_variable_evaluations`
 - `on`
 - `close`
 
@@ -828,7 +870,7 @@ The provider currently requires Ruby 3.4 or newer because that is the minimum ve
 Install the provider:
 
 ```ruby
-gem "featurevisor-openfeature", "~> 2.0"
+gem "featurevisor-openfeature", "~> 3.0"
 ```
 
 It installs the matching `featurevisor` gem and the official `openfeature-sdk` dependency. The provider and base SDK deliberately share the same version, and the provider requires that exact Featurevisor version.
@@ -852,9 +894,9 @@ enabled = client.fetch_boolean_value(
 )
 ```
 
-Use `checkout` for a flag, `checkout:variation` for its variation, and `checkout:title` for its `title` variable. Boolean variables use the boolean resolver. Arrays, hashes, and JSON variables use the object resolver.
+Use `checkout` for a flag, `checkout:variation` for its variation, `checkout:title` for its `title` variable, and `variable:welcomeMessage` for a global variable. Boolean variables use the boolean resolver. Arrays, hashes, and JSON variables use the object resolver.
 
-OpenFeature's targeting key maps to `userId` by default. `targeting_key_field`, `key_separator`, and `variation_key` can customize the mapping.
+OpenFeature's targeting key maps to `userId` by default. `targeting_key_field`, `key_separator`, `variation_key`, and `global_variable_prefix` can customize the mapping. The global variable prefix defaults to `variable` and cannot contain the separator.
 
 You can pass any Featurevisor initialization options directly to the provider. These options are used to create the Featurevisor instance owned by the provider:
 
@@ -908,7 +950,7 @@ The build produces `featurevisor-VERSION.gem` and `featurevisor-openfeature-VERS
 - Run `bundle install`
 - Push commit to `main` branch
 - Wait for CI to complete
-- Tag the release with the same version number, for example `v2.0.0`
+- Tag the release with the same version number, for example `v3.0.0`
 - The workflow verifies that the tag matches the shared version
 - The workflow publishes `featurevisor` first, followed by `featurevisor-openfeature`
 

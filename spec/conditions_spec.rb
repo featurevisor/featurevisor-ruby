@@ -461,7 +461,7 @@ RSpec.describe Featurevisor::Conditions do
     end
   end
 
-  describe "logical composition via datafile reader" do
+  describe "logical composition via the evaluation data provider" do
     it "should match with multiple conditions inside NOT" do
       conditions = [
         {
