@@ -223,18 +223,13 @@ module FeaturevisorCLI
         environment = assertion.key?(:environment) ? assertion[:environment] : false
         environment = false if environment.nil?
 
-        target_key = assertion[:target] ? target_datafile_key(environment, assertion[:target]) : nil
-        base_key = base_datafile_key(environment)
+        return datafiles_by_key[target_datafile_key(environment, assertion[:target])] if assertion[:target]
 
-        if target_key && datafiles_by_key.key?(target_key)
-          return datafiles_by_key[target_key]
-        end
-
-        datafiles_by_key[base_key]
+        datafiles_by_key[base_datafile_key(environment)]
       end
 
       def create_tester_instance(datafile, level, assertion)
-        sticky = parse_sticky(assertion[:sticky])
+        sticky = parse_sticky(assertion[:stickyFeatures] || assertion[:sticky])
         sticky_variables = assertion[:stickyVariables].is_a?(Hash) ? assertion[:stickyVariables] : {}
 
         Featurevisor.create_featurevisor(
@@ -301,13 +296,26 @@ module FeaturevisorCLI
                     puts ""
                   end
 
-                  test_result = run_test_feature(assertion, test[:feature], instance, level)
+                  begin
+                    test_result = run_test_feature(assertion, test[:feature], instance, level)
+                  ensure
+                    instance.close
+                  end
                 end
               elsif test[:variable]
                 datafile = resolve_datafile_for_assertion(assertion, datafiles_by_key)
                 if datafile
+                  if @options.show_datafile
+                    puts ""
+                    puts JSON.pretty_generate(datafile)
+                    puts ""
+                  end
                   instance = create_tester_instance(datafile, level, assertion)
-                  test_result = run_test_variable(assertion, test[:variable], instance)
+                  begin
+                    test_result = run_test_variable(assertion, test[:variable], instance)
+                  ensure
+                    instance.close
+                  end
                 else
                   test_result = { has_error: true, errors: "      ✘ no datafile found for assertion target/environment combination\n", duration: 0 }
                 end
@@ -358,28 +366,61 @@ module FeaturevisorCLI
       end
 
       def run_test_variable(assertion, variable_key, instance)
-        context = parse_context(assertion[:context])
+        instance.set_context(parse_context(assertion[:context]), true)
         options = {}
         options[:default_variable_value] = assertion[:defaultVariableValue] if assertion.key?(:defaultVariableValue)
         started = Time.now
         errors = ""
 
-        if assertion.key?(:expectedValue)
-          actual = instance.get_variable(variable_key, context, options)
-          unless compare_values(actual, assertion[:expectedValue])
-            errors += "      ✘ expectedValue: expected #{assertion[:expectedValue].inspect} but received #{actual.inspect}\n"
-          end
-        end
+        errors += test_variable_expectation(assertion, variable_key, instance, options)
 
-        if assertion[:expectedEvaluation].is_a?(Hash)
-          evaluation = instance.evaluate_variable(variable_key, context, options)
-          assertion[:expectedEvaluation].each do |key, expected|
-            actual = get_evaluation_value(evaluation, key)
-            errors += "      ✘ expectedEvaluation.#{key}: expected #{expected.inspect} but received #{actual.inspect}\n" unless compare_values(actual, expected)
+        Array(assertion[:children]).each_with_index do |child_assertion, child_index|
+          child = instance.spawn(
+            parse_context(child_assertion[:context]),
+            sticky_features: parse_sticky(child_assertion[:stickyFeatures]),
+            sticky_variables: child_assertion[:stickyVariables].is_a?(Hash) ? child_assertion[:stickyVariables] : {}
+          )
+          begin
+            child_options = {}
+            if child_assertion.key?(:defaultVariableValue)
+              child_options[:default_variable_value] = child_assertion[:defaultVariableValue]
+            end
+            errors += test_variable_expectation(
+              child_assertion,
+              variable_key,
+              child,
+              child_options,
+              "children[#{child_index}]."
+            )
+          ensure
+            child.close
           end
         end
 
         { has_error: !errors.empty?, errors: errors, duration: Time.now - started }
+      end
+
+      def test_variable_expectation(assertion, variable_key, evaluator, options, prefix = "")
+        evaluation = evaluator.evaluate_variable(variable_key, {}, options)
+        errors = ""
+        if assertion.key?(:expectedValue) && !compare_values(evaluation[:variable_value], assertion[:expectedValue])
+          errors += "      ✘ #{prefix}expectedValue: expected #{format_test_value(assertion[:expectedValue])} but received #{format_test_value(evaluation[:variable_value])}\n"
+        end
+        if assertion[:expectedEvaluation].is_a?(Hash)
+          assertion[:expectedEvaluation].each do |key, expected|
+            actual = get_evaluation_value(evaluation, key)
+            unless compare_values(actual, expected)
+              errors += "      ✘ #{prefix}expectedEvaluation.#{key}: expected #{format_test_value(expected)} but received #{format_test_value(actual)}\n"
+            end
+          end
+        end
+        errors
+      end
+
+      def format_test_value(value)
+        JSON.generate(value)
+      rescue JSON::GeneratorError
+        value.inspect
       end
 
       def run_test_feature(assertion, feature_key, instance, level)
@@ -518,19 +559,15 @@ module FeaturevisorCLI
               child_context = parse_context(child[:context])
 
               # Create override options for child with sticky values
-              child_override_options = create_override_options(child)
-
-              # Pass sticky values to child instance
-              child_instance = instance.spawn(child_context, child_override_options)
-
-              # Set sticky values for child if they exist
-              # Create a local copy to ensure it's never nil
-              child_sticky = sticky || {}
-              if !child_sticky.empty?
-                child_instance.set_sticky_features(child_sticky, false)
+              child_instance = instance.spawn(
+                child_context,
+                sticky_features: sticky || {}
+              )
+              begin
+                child_result = run_test_feature_child(child, feature_key, child_instance, level)
+              ensure
+                child_instance.close
               end
-
-              child_result = run_test_feature_child(child, feature_key, child_instance, level)
 
               if child_result[:has_error]
                 has_error = true
