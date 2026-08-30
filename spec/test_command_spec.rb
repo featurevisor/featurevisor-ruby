@@ -28,6 +28,14 @@ RSpec.describe FeaturevisorCLI::Commands::Test do
       datafile = command.send(:resolve_datafile_for_assertion, assertion, datafiles_by_key)
       expect(datafile[:target]).to eq("checkout")
     end
+
+    it "does not fall back when a target datafile is missing" do
+      command = described_class.new(options)
+      datafiles_by_key = { "production" => { schemaVersion: "2" } }
+      assertion = { environment: "production", target: "checkout" }
+
+      expect(command.send(:resolve_datafile_for_assertion, assertion, datafiles_by_key)).to be_nil
+    end
   end
 
   describe "build command generation" do
