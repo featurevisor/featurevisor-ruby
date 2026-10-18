@@ -3,11 +3,12 @@
 require "json"
 require "time"
 require "open_feature/sdk"
-require_relative "../featurevisor"
+require "featurevisor"
 
 module Featurevisor
   class OpenFeatureProvider
     Provider = OpenFeature::SDK::Provider
+    include Provider::EventEmitter
 
     attr_reader :metadata, :featurevisor
 
@@ -33,13 +34,26 @@ module Featurevisor
       end
       @error_unsubscribe = @featurevisor.on("error", lambda do |event|
         diagnostic = event[:diagnostic]
-        @datafile_error = diagnostic[:message] if diagnostic&.dig(:code) == "invalid_datafile"
+        if diagnostic&.dig(:code) == "invalid_datafile"
+          @datafile_error = diagnostic[:message]
+          emit_event(OpenFeature::SDK::ProviderEvent::PROVIDER_ERROR,
+            error_code: Provider::ErrorCode::PARSE_ERROR, message: @datafile_error)
+        end
       end)
-      @datafile_unsubscribe = @featurevisor.on("datafile_set", ->(*) { @datafile_error = nil })
-      @featurevisor.set_datafile(initial_datafile, true) if @owns_featurevisor && initial_datafile
+      @datafile_unsubscribe = @featurevisor.on("datafile_set", lambda do |*|
+        recovering = !@datafile_error.nil?
+        @datafile_error = nil
+        emit_event(OpenFeature::SDK::ProviderEvent::PROVIDER_READY) if recovering
+      end)
+      @featurevisor.set_datafile(initial_datafile, true) if @owns_featurevisor && !initial_datafile.nil?
     end
 
-    def init(_evaluation_context = nil); end
+    def init(_evaluation_context = nil)
+      if @datafile_error
+        raise OpenFeature::SDK::ProviderInitializationError.new(@datafile_error,
+          provider: self, error_code: Provider::ErrorCode::PARSE_ERROR)
+      end
+    end
     def shutdown
       return if @shutdown
 
@@ -50,7 +64,7 @@ module Featurevisor
     end
     def hooks = []
 
-    def track(tracking_event_name:, evaluation_context: nil, tracking_event_details: nil)
+    def track(name = nil, tracking_event_name: name, evaluation_context: nil, tracking_event_details: nil)
       @on_track&.call(tracking_event_name, evaluation_context, tracking_event_details)
     end
 
@@ -86,7 +100,7 @@ module Featurevisor
       feature_key, selector = split_key(flag_key)
       context = normalize(evaluation_context&.fields || {})
       targeting_key = evaluation_context&.targeting_key
-      context[@targeting_key_field] = targeting_key if targeting_key && !targeting_key.empty?
+      context[@targeting_key_field] = targeting_key unless targeting_key.nil?
 
       if feature_key == @global_variable_prefix && selector && !selector.empty?
         evaluation = featurevisor.evaluate_variable(selector, context)
@@ -101,8 +115,10 @@ module Featurevisor
       else
         evaluation = featurevisor.evaluate_variable(feature_key, selector, context)
         value = evaluation[:variable_value]
+      end
+      if evaluation[:type] == :variable || evaluation[:type] == "variable"
         variable_type = evaluation.dig(:variable_schema, :type) || evaluation.dig(:variable, :type)
-        if variable_type == "json" && value.is_a?(String)
+        if variable_type == "json" && !evaluation.dig(:variable, :compose) && value.is_a?(String)
           begin
             value = JSON.parse(value)
           rescue JSON::ParserError
@@ -155,9 +171,9 @@ module Featurevisor
 
     def reason(value)
       return Provider::Reason::ERROR if %w[feature_not_found variable_not_found no_variations error].include?(value)
-      return Provider::Reason::TARGETING_MATCH if %w[required forced sticky rule variable_override_variation variable_override_rule].include?(value)
+      return Provider::Reason::TARGETING_MATCH if %w[forced sticky rule variable_override_variation variable_override_rule variable_composed].include?(value)
       return Provider::Reason::SPLIT if value == "allocated"
-      return Provider::Reason::DISABLED if %w[disabled variation_disabled variable_disabled required_features_unmet].include?(value)
+      return Provider::Reason::DISABLED if %w[disabled variation_disabled variable_disabled conditions_unmet].include?(value)
       Provider::Reason::DEFAULT
     end
 

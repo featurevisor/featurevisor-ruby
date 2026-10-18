@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "rubygems/package"
+require "tmpdir"
+require "open3"
+require "rbconfig"
 require_relative "../lib/featurevisor/version"
 
 version = Featurevisor::VERSION
@@ -35,5 +38,48 @@ featurevisor_dependency = provider.dependencies.find { |dependency| dependency.n
 openfeature_dependency = provider.dependencies.find { |dependency| dependency.name == "openfeature-sdk" }
 raise "Provider must depend on matching Featurevisor version" unless featurevisor_dependency&.requirement == Gem::Requirement.new("= #{version}")
 raise "Provider must depend on openfeature-sdk ~> 0.6.5" unless openfeature_dependency&.requirement == Gem::Requirement.new("~> 0.6.5")
+
+Dir.mktmpdir("featurevisor-packaged-") do |directory|
+  base_directory = File.join(directory, "base")
+  provider_directory = File.join(directory, "provider")
+  Gem::Package.new(base_path).extract_files(base_directory)
+  Gem::Package.new(provider_path).extract_files(provider_directory)
+  paths = [File.join(base_directory, "lib"), File.join(provider_directory, "lib")]
+  paths.concat(Gem::Specification.find_by_name("openfeature-sdk", "~> 0.6.5").full_require_paths)
+  base_script = <<~RUBY
+    require "featurevisor"
+    abort "OpenFeature leaked into base gem" if defined?(OpenFeature)
+    instance = Featurevisor.create_featurevisor(log_level: "fatal")
+    instance.close
+  RUBY
+  stdout, stderr, status = Open3.capture3(
+    {"RUBYOPT" => nil, "RUBYLIB" => nil, "BUNDLE_GEMFILE" => nil},
+    RbConfig.ruby, "--disable-gems", "-I", paths.first, "-e", base_script,
+    chdir: directory
+  )
+  raise "Packaged base could not load without OpenFeature: #{stdout}#{stderr}" unless status.success?
+  script = <<~RUBY
+    require "featurevisor-openfeature"
+    abort "Wrong packaged version" unless Featurevisor::VERSION == #{version.inspect}
+    tracked = []
+    provider = Featurevisor::OpenFeatureProvider.new(
+      log_level: "fatal", on_track: ->(*args) { tracked << args },
+      datafile: { schemaVersion: "4", revision: "packaged", segments: {},
+                  features: { checkout: { bucketBy: "userId", traffic: [{ key: "all", conditions: "*", percentage: 100_000 }] } } }
+    )
+    OpenFeature::SDK.configure { |config| config.set_provider_and_wait(provider) }
+    client = OpenFeature::SDK.build_client
+    abort "Packaged client resolution failed" unless client.fetch_boolean_value(flag_key: "checkout", default_value: false)
+    client.track("purchase")
+    abort "Packaged tracking failed" unless tracked.first&.first == "purchase"
+    OpenFeature::SDK.shutdown
+  RUBY
+  stdout, stderr, status = Open3.capture3(
+    {"RUBYOPT" => nil, "RUBYLIB" => nil, "BUNDLE_GEMFILE" => nil},
+    RbConfig.ruby, *paths.flat_map { |path| ["-I", path] }, "-e", script,
+    chdir: directory
+  )
+  raise "Packaged provider could not load its separate core gem: #{stdout}#{stderr}" unless status.success?
+end
 
 puts "Verified #{base_path} and #{provider_path}"

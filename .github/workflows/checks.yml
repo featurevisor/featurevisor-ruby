@@ -54,7 +54,16 @@ jobs:
           bundler-cache: true
 
       - name: Test both packages
+        env:
+          LANG: C.UTF-8
+          LC_ALL: C.UTF-8
+          LC_CTYPE: C.UTF-8
         run: make test
+
+      - name: Test both packages with C and unset locales
+        run: |
+          env LANG=C LC_ALL=C LC_CTYPE=C bundle exec rspec spec/
+          env -u LANG -u LC_ALL -u LC_CTYPE bundle exec rspec spec/
 
       - name: Build and verify both gem artifacts
         run: make build
@@ -68,7 +77,7 @@ jobs:
         run: |
           mkdir example-1
           cd example-1
-          npx --yes @featurevisor/cli@3 init --example=1
+          npx --yes @featurevisor/cli@latest init --example=1
           npm install
           npx featurevisor build
           npx featurevisor test --onlyFailures

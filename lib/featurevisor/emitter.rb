@@ -31,6 +31,7 @@ module Featurevisor
         is_active = false
         index = listeners.index(callback)
         listeners.delete_at(index) if index && index >= 0
+        callback = nil
       end
     end
 
@@ -54,6 +55,9 @@ module Featurevisor
 
     # Clear all event listeners
     def clear_all
+      # Cleanup functions may still reference the previous listener arrays.
+      # Empty those arrays too, rather than retaining unrelated callbacks.
+      @listeners.each_value(&:clear)
       @listeners = {}
     end
   end

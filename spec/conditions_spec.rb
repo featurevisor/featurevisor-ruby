@@ -14,7 +14,141 @@ RSpec.describe Featurevisor::Conditions do
     )
   end
 
+  describe "native date values" do
+    def date_matches(actual, operator, expected)
+      datafile_reader.all_conditions_are_matched(
+        { attribute: "date", operator: operator, value: expected }, { date: actual }
+      )
+    end
+
+    %w[UTC America/Los_Angeles Asia/Tokyo].each do |zone|
+      context "with TZ=#{zone}" do
+        around do |example|
+          previous = ENV["TZ"]
+          ENV["TZ"] = zone
+          example.run
+        ensure
+          previous.nil? ? ENV.delete("TZ") : ENV["TZ"] = previous
+        end
+
+        it "rejects plain Date on either side of both operators" do
+          [Date.new(2026, 1, 1), Class.new(Date).new(2026, 1, 1)].each do |value|
+            %w[before after].each do |operator|
+              expect(date_matches(value, operator, "2026-01-01T05:00:00Z")).to be false
+              expect(date_matches("2026-01-01T05:00:00Z", operator, value)).to be false
+            end
+          end
+        end
+
+        it "accepts Time, DateTime and portable timestamps as the same instant" do
+          [Time.utc(2026, 1, 1), Time.new(2026, 1, 1, 9, 0, 0, "+09:00"),
+           DateTime.iso8601("2025-12-31T16:00:00-08:00"),
+           Class.new(DateTime).iso8601("2026-01-01T00:00:00Z"),
+           "2026-01-01T09:00:00+09:00"].each do |value|
+            expect(date_matches(value, "before", "2026-01-01T00:00:00.001Z")).to be true
+            expect(date_matches(value, "after", "2025-12-31T23:59:59.999Z")).to be true
+            expect(date_matches("2026-01-01T00:00:00.001Z", "after", value)).to be true
+            expect(date_matches("2025-12-31T23:59:59.999Z", "before", value)).to be true
+            %w[before after].each do |operator|
+              expect(date_matches(value, operator, "2026-01-01T00:00:00Z")).to be false
+            end
+          end
+        end
+
+        it "truncates native fractions to milliseconds including before the epoch" do
+          %w[2026-01-01T00:00:00.000Z 1969-12-31T23:59:59.999Z].each do |boundary|
+            instant = Time.iso8601(boundary)
+            value = instant + Rational(999999, 1_000_000_000)
+            [value, value.getlocal("+09:00"), value.to_datetime].each do |native|
+              %w[before after].each do |operator|
+                expect(date_matches(native, operator, boundary)).to be false
+                expect(date_matches(boundary, operator, native)).to be false
+              end
+              expect(date_matches(native, "before", instant + Rational(1, 1000))).to be true
+              expect(date_matches(native, "after", instant - Rational(1, 1000))).to be true
+            end
+          end
+        end
+
+        it "accepts offsets up to fourteen hours without discarding seconds" do
+          instant = Time.utc(2026, 1, 1)
+          [-50400, 50400, -50399, 50399, -1, 1].each do |seconds|
+            [instant.getlocal(seconds), instant.to_datetime.new_offset(Rational(seconds, 86400))].each do |value|
+              expect(date_matches(value, "before", "2026-01-01T00:00:00.001Z")).to be true
+              expect(date_matches(value, "after", "2025-12-31T23:59:59.999Z")).to be true
+              expect(date_matches("2026-01-01T00:00:00.001Z", "after", value)).to be true
+              expect(date_matches("2025-12-31T23:59:59.999Z", "before", value)).to be true
+              %w[before after].each do |operator|
+                expect(date_matches(value, operator, "2026-01-01T00:00:00Z")).to be false
+                expect(date_matches("2026-01-01T00:00:00Z", operator, value)).to be false
+              end
+            end
+          end
+          [-1, 1].each do |sign|
+            value = instant.getlocal(sign * Rational(100799, 2))
+            expect(date_matches(value, "before", "2026-01-01T00:00:00.001Z")).to be true
+            expect(date_matches(value, "after", "2025-12-31T23:59:59.999Z")).to be true
+          end
+        end
+
+        it "rejects offsets beyond fourteen hours including extra seconds and fractions" do
+          instant = Time.utc(2026, 1, 1)
+          values = [-54000, 54000, -50401, 50401].flat_map do |seconds|
+            [instant.getlocal(seconds), instant.to_datetime.new_offset(Rational(seconds, 86400))]
+          end
+          values += [-1, 1].map { |sign| instant.getlocal(sign * Rational(100801, 2)) }
+          values.each do |value|
+            %w[before after].each do |operator|
+              %w[2025-12-31T23:59:59.999Z 2026-01-01T00:00:00.001Z].each do |boundary|
+                expect(date_matches(value, operator, boundary)).to be false
+                expect(date_matches(boundary, operator, value)).to be false
+              end
+            end
+          end
+        end
+
+        it "rejects native written or UTC years outside the portable range without raising" do
+          ["0000-12-31T23:00:00-02:00", "10000-01-01T01:00:00+02:00",
+           "0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"].each do |text|
+            [Time.iso8601(text), DateTime.iso8601(text)].each do |value|
+              %w[before after].each do |operator|
+                expect(date_matches(value, operator, "2026-01-01T00:00:00Z")).to be false
+                expect(date_matches("2026-01-01T00:00:00Z", operator, value)).to be false
+              end
+            end
+          end
+        end
+
+        it "accepts both native year range endpoints" do
+          [Time.utc(1, 1, 1), Time.utc(9999, 12, 31, 23, 59, Rational(59999, 1000))].each do |value|
+            [value, value.to_datetime].each do |native|
+              operator = value.year == 1 ? "before" : "after"
+              expect(date_matches(native, operator, "2026-01-01T00:00:00Z")).to be true
+            end
+          end
+        end
+      end
+    end
+  end
+
   describe "basic functionality" do
+    it "truncates one to nine string fractional digits to milliseconds" do
+      parse = ->(value) { Featurevisor::Conditions.send(:portable_date, value) }
+      %w[1239 123999 1239999 123999999].each do |digits|
+        expect(parse.call("2024-01-01T00:00:00.#{digits}Z")).to eq(parse.call("2024-01-01T00:00:00.123Z"))
+      end
+      expect(parse.call("2024-01-01T00:00:00.1234567890Z")).to be_nil
+      expect(parse.call("1969-12-31T23:59:59.999999999Z").to_r).to eq(Rational(-1, 1_000))
+    end
+
+    it "floors pre epoch host dates to milliseconds and rejects offsets beyond fourteen hours" do
+      host = Time.at(Rational(-1, 2000)).utc
+      parsed = Featurevisor::Conditions.send(:portable_date, host)
+      expect(parsed.to_r).to eq(Rational(-1, 1000))
+      expect(Featurevisor::Conditions.send(:portable_date, Time.new(2024, 1, 1, 15, 0, 0, "+15:00"))).to be_nil
+      expect(Featurevisor::Conditions.send(:portable_date, "2024-01-01T15:00:00+15:00")).to be_nil
+    end
+
     it "should be a module" do
       expect(Featurevisor::Conditions).to be_a(Module)
     end
@@ -89,6 +223,38 @@ RSpec.describe Featurevisor::Conditions do
       expect(Featurevisor::Conditions.condition_is_matched(
         { attribute: "values", operator: "includes", value: 1 },
         { values: ["1"] }, get_regex
+      )).to be false
+    end
+
+    it "matches empty and notEmpty for shallow string, array and object contents" do
+      cases = [
+        ["empty", "", true],
+        ["notEmpty", "", false],
+        ["empty", " ", false],
+        ["notEmpty", " ", true],
+        ["empty", [], true],
+        ["notEmpty", [nil], true],
+        ["empty", {}, true],
+        ["notEmpty", { value: nil }, true],
+        ["empty", nil, false],
+        ["notEmpty", nil, false],
+        ["empty", 0, false],
+        ["notEmpty", false, false],
+        ["empty", Object.new, false],
+        ["notEmpty", Object.new, false]
+      ]
+
+      cases.each do |operator, value, expected|
+        condition = { attribute: "profile.value", operator: operator }
+        context = { profile: { value: value } }
+        expect(Featurevisor::Conditions.condition_is_matched(condition, context, get_regex)).to be(expected)
+      end
+
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "profile.missing", operator: "empty" }, { profile: {} }, get_regex
+      )).to be false
+      expect(Featurevisor::Conditions.condition_is_matched(
+        { attribute: "profile.missing", operator: "notEmpty" }, { profile: {} }, get_regex
       )).to be false
     end
 

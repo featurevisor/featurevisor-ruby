@@ -12,23 +12,15 @@ module Featurevisor
         @id = SecureRandom.uuid
         @name = options[:name]
         @setup = options[:setup]
-        @before = options[:before]
         @before_evaluation = options[:before_evaluation] || options[:beforeEvaluation]
         @bucket_key = options[:bucket_key]
         @bucket_value = options[:bucket_value]
-        @after = options[:after]
         @after_evaluation = options[:after_evaluation] || options[:afterEvaluation]
         @close = options[:close]
       end
 
       def call_setup(api)
         @setup.call(api) if @setup
-      end
-
-      def call_before(options)
-        return options unless @before
-
-        @before.call(options)
       end
 
       def call_before_evaluation(options)
@@ -49,12 +41,6 @@ module Featurevisor
         @bucket_value.call(options)
       end
 
-      def call_after(evaluation, options)
-        return evaluation unless @after
-
-        @after.call(evaluation, options)
-      end
-
       def call_after_evaluation(evaluation, options)
         return evaluation unless @after_evaluation
 
@@ -71,6 +57,7 @@ module Featurevisor
 
       def initialize(options = {})
         @modules = []
+        @on_change = options[:on_change]
         @report_diagnostic = options[:report_diagnostic]
         @module_api_factory = options[:module_api_factory]
         @clear_module_diagnostic_subscriptions = options[:clear_module_diagnostic_subscriptions]
@@ -114,7 +101,9 @@ module Featurevisor
           close_module(mod)
           return nil
         end
-        @modules << mod
+        # Replace membership so an active phase keeps its starting list.
+        @modules = @modules + [mod]
+        @on_change&.call
 
         -> { remove(mod) }
       end
@@ -126,6 +115,7 @@ module Featurevisor
           removed << mod if matches
           matches
         end
+        @on_change&.call unless removed.empty?
 
         removed.each do |mod|
           @clear_module_diagnostic_subscriptions.call(mod) if @clear_module_diagnostic_subscriptions
@@ -137,15 +127,6 @@ module Featurevisor
         @modules
       end
 
-      def run_before_modules(options)
-        result = @modules.reduce(options) do |current, mod|
-          mod.call_before(current)
-        end
-        @modules.reduce(result) do |current, mod|
-          mod.call_before_evaluation(current)
-        end
-      end
-
       def run_before_evaluation_modules(options)
         @modules.reduce(options) do |result, mod|
           mod.call_before_evaluation(result)
@@ -155,28 +136,6 @@ module Featurevisor
       def run_after_evaluation_modules(evaluation, options)
         @modules.reduce(evaluation) do |result, mod|
           mod.call_after_evaluation(result, options)
-        end
-      end
-
-      def run_after_modules(evaluation, options)
-        result = @modules.reduce(evaluation) do |current, mod|
-          mod.call_after_evaluation(current, options)
-        end
-        @modules.reduce(result) do |current, mod|
-          mod.call_after(current, options)
-        end
-      end
-
-      # Deprecated feature-only callbacks are intentionally excluded here.
-      def run_global_after_modules(evaluation, options)
-        @modules.reduce(evaluation) do |result, mod|
-          mod.call_after_evaluation(result, options)
-        end
-      end
-
-      def run_legacy_before_modules(options)
-        @modules.reduce(options) do |result, mod|
-          mod.call_before(result)
         end
       end
 
@@ -197,6 +156,7 @@ module Featurevisor
       end
 
       def close_all
+        @on_change&.call unless @modules.empty?
         @modules.each do |mod|
           @clear_module_diagnostic_subscriptions.call(mod) if @clear_module_diagnostic_subscriptions
           close_module(mod)

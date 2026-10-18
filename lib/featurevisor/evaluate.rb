@@ -6,8 +6,6 @@ module Featurevisor
     # Feature specific
     FEATURE_NOT_FOUND = "feature_not_found" # feature is not found in datafile
     DISABLED = "disabled" # feature is disabled
-    REQUIRED = "required" # required features are not enabled
-    OUT_OF_RANGE = "out_of_range" # out of range when mutually exclusive experiments are involved via Groups
 
     # Variations specific
     NO_VARIATIONS = "no_variations" # feature has no variations
@@ -19,7 +17,8 @@ module Featurevisor
     VARIABLE_DISABLED = "variable_disabled" # feature is disabled, and variable's disabledValue is used
     VARIABLE_OVERRIDE_VARIATION = "variable_override_variation" # variable overridden from inside a variation
     VARIABLE_OVERRIDE_RULE = "variable_override_rule" # variable overridden from inside a rule
-    REQUIRED_FEATURES_UNMET = "required_features_unmet"
+    CONDITIONS_UNMET = "conditions_unmet"
+    VARIABLE_COMPOSED = "variable_composed"
 
     # Common
     NO_MATCH = "no_match" # no rules matched
@@ -36,49 +35,8 @@ module Featurevisor
 
   # Evaluation module for feature flag evaluation
   module Evaluate
-    def self.required_features_are_matched(requirements, datafile, options)
-      return true if requirements.nil?
-
-      items = requirements.is_a?(Array) ? requirements : [requirements]
-      clean_options = options.reject do |key, _|
-        %i[feature_key variable_key default_variation_value default_variable_value].include?(key)
-      end
-      items.all? do |required|
-        if required.is_a?(String)
-          key = required
-          enabled = true
-          variation = nil
-        elsif required.key?(:feature)
-          key = required[:feature]
-          enabled = required.key?(:enabled) ? required[:enabled] : true
-          variation = required[:variation]
-        else
-          key = required[:key]
-          enabled = true
-          variation = required[:variation]
-        end
-
-        flag = evaluate_with_modules(clean_options.merge(type: "flag", feature_key: key, datafile: datafile))
-        next false unless (flag[:enabled] == true) == enabled
-        next true if variation.nil?
-
-        evaluated_variation = evaluate_with_modules(clean_options.merge(type: "variation", feature_key: key, datafile: datafile))
-        value = evaluated_variation.key?(:variation_value) ? evaluated_variation[:variation_value] : evaluated_variation.dig(:variation, :value)
-        value == variation
-      end
-    end
-
     def self.variable_override_matches?(override, datafile, context, options)
-      return false unless required_features_are_matched(override[:requiredFeatures], datafile, options)
-
-      conditions_match = !override[:conditions] || datafile.all_conditions_are_matched(
-        datafile.parse_conditions_if_stringified(override[:conditions]), context
-      )
-      segments_match = !override[:segments] || datafile.all_segments_are_matched(
-        datafile.parse_segments_if_stringified(override[:segments]), context
-      )
-      conditions_match && segments_match &&
-        (override.key?(:conditions) || override.key?(:segments) || override.key?(:requiredFeatures))
+      override.key?(:conditions) && UnifiedConditions.matches?(override[:conditions], options)
     end
 
     # Evaluate with modules
@@ -86,13 +44,36 @@ module Featurevisor
     # @return [Hash] Evaluation result
     def self.evaluate_with_modules(options)
       begin
-        modules_manager = options[:modules_manager]
-
-        # Run before modules
-        result_options = options
-        if modules_manager
-          result_options = modules_manager.run_before_modules(result_options)
+        session = options[:__featurevisor_session] || EvaluationSession.new
+        options = options.merge(__featurevisor_session: session)
+        if options[:__featurevisor_prerequisite]
+          options[:sticky] = options[:__featurevisor_sticky_features_source].call if options[:__featurevisor_sticky_features_source]
+          options[:sticky_variables] = options[:__featurevisor_sticky_variables_source].call if options[:__featurevisor_sticky_variables_source]
+          options[:datafile] = options[:__featurevisor_datafile_source].call if options[:__featurevisor_datafile_source]
         end
+        options[:dependency_of] = session.dependency_of if options[:__featurevisor_prerequisite]
+        options[:dependency_purpose] ||= "condition" if options[:__featurevisor_prerequisite]
+        return session.run(options, prerequisite: options[:__featurevisor_prerequisite]) do
+        modules_manager = options[:modules_manager]
+        # The usual read has no modules. Keep its evaluation options intact so
+        # it does not allocate two filtered hashes and a merged hash.
+        result_options = options
+        if modules_manager && !modules_manager.get_all.empty?
+          private_options = options.select { |key, _| private_evaluation_option?(key) }
+          public_options = options.reject { |key, _| private_evaluation_option?(key) }
+          result_options = modules_manager.run_before_evaluation_modules(public_options)
+          result_options = result_options.reject { |key, _| private_evaluation_option?(key) }.merge(private_options)
+        end
+        { sticky: :__featurevisor_sticky_features_source,
+          sticky_variables: :__featurevisor_sticky_variables_source }.each do |field, source|
+          if result_options[field].equal?(options[field])
+            result_options[field] = options[source].call if options[source]
+          else
+            replacement = result_options[field]
+            result_options[source] = -> { replacement }
+          end
+        end
+        session.update_current(result_options)
 
         # Evaluate
         evaluation = evaluate(result_options)
@@ -113,12 +94,18 @@ module Featurevisor
         end
 
         # Run after modules
-        if modules_manager
-          evaluation = modules_manager.run_after_modules(evaluation, result_options)
+        # A callback during evaluation may add a module. In that case its
+        # after hook still receives only public options.
+        if modules_manager && !modules_manager.get_all.empty?
+          evaluation = modules_manager.run_after_evaluation_modules(
+            evaluation, result_options.reject { |key, _| private_evaluation_option?(key) }
+          )
         end
 
         evaluation
+        end
       rescue => e
+        raise if e.is_a?(RequirementError) && options[:__featurevisor_prerequisite]
         type = options[:type]
         feature_key = options[:feature_key]
         variable_key = options[:variable_key]
@@ -132,10 +119,16 @@ module Featurevisor
           error: e
         }
 
+        session.remember(options, evaluation) if session
+
         diagnostics.error("Error during evaluation", evaluation)
 
         evaluation
       end
+    end
+
+    def self.private_evaluation_option?(key)
+      key.to_s.start_with?("__featurevisor_")
     end
 
     # Main evaluation function
@@ -228,7 +221,7 @@ module Featurevisor
               type: type,
               feature_key: feature_key,
               reason: Featurevisor::EvaluationReason::STICKY,
-              sticky: sticky_feature,
+              sticky_feature: sticky_feature,
               enabled: sticky_feature[:enabled]
             }
 
@@ -341,7 +334,7 @@ module Featurevisor
         end
 
         # Forced
-        force_result = datafile.get_matched_force(feature, context)
+        force_result = datafile.get_matched_force(feature, context, options)
         force = force_result[:force]
         force_index = force_result[:forceIndex]
 
@@ -402,25 +395,17 @@ module Featurevisor
           end
         end
 
-        # Required
-        required_features = feature[:requiredFeatures] || feature[:required]
-        if type == "flag" && required_features && !Array(required_features).empty?
-          required_features_are_enabled = required_features_are_matched(required_features, datafile, options)
-
-          unless required_features_are_enabled
-            evaluation = {
-              type: type,
-              feature_key: feature_key,
-              reason: Featurevisor::EvaluationReason::REQUIRED,
-              required: feature[:required],
-              required_features: feature[:requiredFeatures],
-              enabled: required_features_are_enabled
-            }
-
-            diagnostics.debug("required features not enabled", evaluation)
-
-            return evaluation
-          end
+        if type == "flag" && feature.key?(:conditions) &&
+           !UnifiedConditions.matches?(feature[:conditions], options)
+          evaluation = {
+            type: type,
+            feature_key: feature_key,
+            reason: Featurevisor::EvaluationReason::CONDITIONS_UNMET,
+            conditions: feature[:conditions],
+            enabled: false
+          }
+          diagnostics.debug("conditions did not match", evaluation)
+          return evaluation
         end
 
         # Bucketing
@@ -455,13 +440,13 @@ module Featurevisor
         matched_allocation = nil
 
         if type != "flag"
-          matched_traffic = datafile.get_matched_traffic(feature[:traffic], context)
+          matched_traffic = datafile.get_matched_traffic(feature[:traffic], context, options)
 
           if matched_traffic
             matched_allocation = datafile.get_matched_allocation(matched_traffic, bucket_value)
           end
         else
-          matched_traffic = datafile.get_matched_traffic(feature[:traffic], context)
+          matched_traffic = datafile.get_matched_traffic(feature[:traffic], context, options)
         end
 
         if matched_traffic
@@ -485,45 +470,6 @@ module Featurevisor
 
           # flag
           if type == "flag"
-            # flag: check if mutually exclusive
-            if feature[:ranges] && feature[:ranges].length > 0
-              matched_range = feature[:ranges].find do |range|
-                bucket_value >= range[0] && bucket_value < range[1]
-              end
-
-              # matched
-              if matched_range
-                evaluation = {
-                  type: type,
-                  feature_key: feature_key,
-                  reason: Featurevisor::EvaluationReason::ALLOCATED,
-                  bucket_key: bucket_key,
-                  bucket_value: bucket_value,
-                  rule_key: matched_traffic[:key],
-                  traffic: matched_traffic,
-                  enabled: matched_traffic[:enabled].nil? ? true : matched_traffic[:enabled]
-                }
-
-                diagnostics.debug("matched", evaluation)
-
-                return evaluation
-              end
-
-              # no match
-              evaluation = {
-                type: type,
-                feature_key: feature_key,
-                reason: Featurevisor::EvaluationReason::OUT_OF_RANGE,
-                bucket_key: bucket_key,
-                bucket_value: bucket_value,
-                enabled: false
-              }
-
-              diagnostics.debug("not matched", evaluation)
-
-              return evaluation
-            end
-
             # flag: override from rule
             if matched_traffic.key?(:enabled)
               evaluation = {
@@ -634,7 +580,8 @@ module Featurevisor
                 variable_schema: variable_schema,
                 variable_value: override[:value],
                 variable_override_index: override_index,
-                variable_override_key: override[:key]
+                variable_override_key: override[:key],
+                variable_override_path: override[:keyPath]
               }
 
               diagnostics.debug("variable override from rule", evaluation)
@@ -698,7 +645,8 @@ module Featurevisor
                   variable_schema: variable_schema,
                   variable_value: override[:value],
                   variable_override_index: override_index,
-                  variable_override_key: override[:key]
+                  variable_override_key: override[:key],
+                  variable_override_path: override[:keyPath]
                 }
 
                 diagnostics.debug("variable override from variation", evaluation)
@@ -791,6 +739,7 @@ module Featurevisor
 
         evaluation
       rescue => e
+        raise if e.is_a?(RequirementError)
         evaluation = {
           type: type,
           feature_key: feature_key,

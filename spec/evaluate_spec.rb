@@ -5,8 +5,8 @@ RSpec.describe Featurevisor::Evaluate do
     it "should have feature specific reasons" do
       expect(Featurevisor::EvaluationReason::FEATURE_NOT_FOUND).to eq("feature_not_found")
       expect(Featurevisor::EvaluationReason::DISABLED).to eq("disabled")
-      expect(Featurevisor::EvaluationReason::REQUIRED).to eq("required")
-      expect(Featurevisor::EvaluationReason::OUT_OF_RANGE).to eq("out_of_range")
+      expect(Featurevisor::EvaluationReason::CONDITIONS_UNMET).to eq("conditions_unmet")
+      expect(Featurevisor::EvaluationReason.const_defined?(:REQUIRED, false)).to be(false)
     end
 
     it "should have variation specific reasons" do
@@ -79,7 +79,7 @@ RSpec.describe Featurevisor::Evaluate do
     it "should apply default variation value when specified" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(
         name: "test-module",
-        after: ->(eval, opts) { eval.merge(module_applied: true) }
+        after_evaluation: ->(eval, _opts) { eval.merge(module_applied: true) }
       )
       modules_manager.add(mod)
 
@@ -105,7 +105,7 @@ RSpec.describe Featurevisor::Evaluate do
     it "should apply default variable value when specified" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(
         name: "test-module",
-        after: ->(eval, opts) { eval.merge(module_applied: true) }
+        after_evaluation: ->(eval, _opts) { eval.merge(module_applied: true) }
       )
       modules_manager.add(mod)
 
@@ -186,7 +186,7 @@ RSpec.describe Featurevisor::Evaluate do
 
       expect(result[:reason]).to eq(Featurevisor::EvaluationReason::STICKY)
       expect(result[:enabled]).to be true
-      expect(result[:sticky]).to eq(sticky["test-feature"])
+      expect(result[:sticky_feature]).to eq(sticky["test-feature"])
     end
 
     it "should handle sticky variations" do
@@ -274,7 +274,7 @@ RSpec.describe Featurevisor::Evaluate do
     it "should handle required features" do
       feature = {
         key: "test-feature",
-        required: ["required-feature"]
+        conditions: [{ feature: "required-feature" }]
       }
 
       # Mock the get_feature method to return our feature
@@ -312,17 +312,22 @@ RSpec.describe Featurevisor::Evaluate do
         enabled: false
       })
 
+      allow(diagnostics).to receive(:debug).and_call_original
       result = Featurevisor::Evaluate.evaluate(options)
 
-      expect(result[:reason]).to eq(Featurevisor::EvaluationReason::REQUIRED)
+      expect(result[:reason]).to eq(Featurevisor::EvaluationReason::CONDITIONS_UNMET)
       expect(result[:enabled]).to be false
-      expect(result[:required]).to eq(["required-feature"])
+      expect(result[:conditions]).to eq([{ feature: "required-feature" }])
+      expect(JSON.parse(JSON.generate(result))["reason"]).to eq("conditions_unmet")
+      expect(diagnostics).to have_received(:debug).with(
+        "conditions did not match", hash_including(reason: "conditions_unmet", enabled: false)
+      )
     end
 
     it "should treat required variation value false as a valid match" do
       feature = {
         key: "test-feature",
-        required: [{ key: "required-feature", variation: false }]
+        conditions: [{ feature: "required-feature", variation: false }]
       }
 
       allow(datafile_reader).to receive(:get_feature).and_return(feature)
@@ -359,13 +364,13 @@ RSpec.describe Featurevisor::Evaluate do
         datafile: datafile_reader
       )
 
-      expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::REQUIRED)
+      expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::CONDITIONS_UNMET)
     end
 
     it "should treat required variation value 0 as a valid match" do
       feature = {
         key: "test-feature",
-        required: [{ key: "required-feature", variation: 0 }]
+        requiredFeatures: [{ feature: "required-feature", variation: 0 }]
       }
 
       allow(datafile_reader).to receive(:get_feature).and_return(feature)
@@ -402,7 +407,7 @@ RSpec.describe Featurevisor::Evaluate do
         datafile: datafile_reader
       )
 
-      expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::REQUIRED)
+      expect(result[:reason]).not_to eq(Featurevisor::EvaluationReason::CONDITIONS_UNMET)
     end
 
     it "should handle errors gracefully" do

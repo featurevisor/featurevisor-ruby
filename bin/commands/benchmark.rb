@@ -2,10 +2,12 @@ require "benchmark"
 require "json"
 require "time"
 require "open3"
+require_relative "runtime_project"
 
 module FeaturevisorCLI
   module Commands
     class Benchmark
+      include RuntimeProject
       def self.run(options)
         new(options).run
       end
@@ -17,19 +19,16 @@ module FeaturevisorCLI
 
       def run
         # Validate required options
-        unless @options.environment
-          puts "Error: --environment is required for benchmark command"
-          exit 1
-        end
-
         unless @options.feature || @options.variable
           puts "Error: --feature or --variable is required for benchmark command"
           exit 1
         end
 
         context = parse_context
-        targets = resolve_targets
-        (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+        each_project do
+          targets = resolve_targets
+          (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+        end
       end
 
       private
@@ -43,7 +42,7 @@ module FeaturevisorCLI
         puts "\nBenchmark Featurevisor feature"
         puts "  Feature: #{@options.feature}" if @options.feature
         puts "  Global variable: #{@options.variable}" if @options.variable && !@options.feature
-        puts "  Environment: #{@options.environment}"
+        puts "  Environment: #{@options.environment}" if @options.environment
         puts "  Target: #{target}" if target
         puts "  Iterations: #{@options.n}"
         puts "  Build duration: #{datafile_build_duration_ms}ms"
@@ -85,26 +84,12 @@ module FeaturevisorCLI
         puts "Maximum duration: #{format_duration_ms(output[:max_duration])}"
       end
 
-      def resolve_targets
-        return [] if @options.targets.empty?
-        stdout, stderr, status = Open3.capture3("npx", "featurevisor", "list", "--targets", "--json", chdir: @project_path)
-        unless status.success?
-          puts stderr
-          exit 1
-        end
-        available = JSON.parse(stdout).map { |target| target.is_a?(Hash) ? (target["key"] || target["name"]) : target }
-        unknown = @options.targets.find { |target| !available.include?(target) }
-        if unknown
-          puts "Unknown target \"#{unknown}\". Available targets: #{available.empty? ? "none" : available.join(", ")}."
-          exit 1
-        end
-        @options.targets
-      end
 
       def parse_context
         if @options.context
           begin
             context = JSON.parse(@options.context)
+            raise ArgumentError, "--context must be a JSON object" unless context.is_a?(Hash)
             # Convert string keys to symbols for the SDK
             context.transform_keys(&:to_sym)
           rescue JSON::ParserError => e
@@ -116,35 +101,12 @@ module FeaturevisorCLI
         end
       end
 
-      def build_datafile(environment, target = nil)
-        puts "Building datafile for environment: #{environment}..."
-
-        command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
-        command_parts << "--target=#{target}" if target
-
-        # Add inflate if specified
-        if @options.inflate && @options.inflate > 0
-          command_parts << "--inflate=#{@options.inflate}"
-        end
-
-        command = command_parts.join(" ")
-
-        # Execute the command and capture output
-        datafile_output = execute_command(command)
-
-        # Parse the JSON output
-        begin
-          JSON.parse(datafile_output, symbolize_names: true)
-        rescue JSON::ParserError => e
-          puts "Error: Failed to parse datafile JSON: #{e.message}"
-          puts "Command output: #{datafile_output}"
-          exit 1
-        end
-      end
 
       def execute_command(command)
         # Execute the command and capture stdout/stderr
         stdout, stderr, status = Open3.capture3(command)
+        stdout.force_encoding(Encoding::UTF_8)
+        stderr.force_encoding(Encoding::UTF_8)
 
         unless status.success?
           puts "Error: Command failed with exit code #{status.exitstatus}"

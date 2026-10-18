@@ -1,10 +1,12 @@
 require "json"
 require "securerandom"
 require "open3"
+require_relative "runtime_project"
 
 module FeaturevisorCLI
   module Commands
     class AssessDistribution
+      include RuntimeProject
       # UUID_LENGTHS matches the TypeScript implementation
       UUID_LENGTHS = [4, 2, 2, 2, 6]
 
@@ -19,11 +21,6 @@ module FeaturevisorCLI
 
       def run
         # Validate required options
-        unless @options.environment
-          puts "Error: --environment is required for assess-distribution command"
-          exit 1
-        end
-
         unless @options.feature
           puts "Error: --feature is required for assess-distribution command"
           exit 1
@@ -31,8 +28,10 @@ module FeaturevisorCLI
 
         context = parse_context
 
-        targets = resolve_targets
-        (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+        each_project do
+          targets = resolve_targets
+          (targets.empty? ? [nil] : targets).each { |target| run_for_target(context, target) }
+        end
       end
 
       private
@@ -40,7 +39,7 @@ module FeaturevisorCLI
       def run_for_target(context, target)
         puts "\nAssess Featurevisor distribution"
         puts "  Feature: #{@options.feature}"
-        puts "  Environment: #{@options.environment}"
+        puts "  Environment: #{@options.environment}" if @options.environment
         puts "  Target: #{target}" if target
         puts "  Iterations: #{@options.n}"
 
@@ -112,26 +111,12 @@ module FeaturevisorCLI
         end
       end
 
-      def resolve_targets
-        return [] if @options.targets.empty?
-        stdout, stderr, status = Open3.capture3("npx", "featurevisor", "list", "--targets", "--json", chdir: @project_path)
-        unless status.success?
-          puts stderr
-          exit 1
-        end
-        available = JSON.parse(stdout).map { |item| item.is_a?(Hash) ? (item["key"] || item["name"]) : item }
-        unknown = @options.targets.find { |target| !available.include?(target) }
-        if unknown
-          puts "Unknown target \"#{unknown}\". Available targets: #{available.empty? ? "none" : available.join(", ")}."
-          exit 1
-        end
-        @options.targets
-      end
 
       def parse_context
         if @options.context
           begin
             context = JSON.parse(@options.context)
+            raise ArgumentError, "--context must be a JSON object" unless context.is_a?(Hash)
             # Convert string keys to symbols for the SDK
             context.transform_keys(&:to_sym)
           rescue JSON::ParserError => e
@@ -143,38 +128,11 @@ module FeaturevisorCLI
         end
       end
 
-      def build_datafile(environment, target = nil)
-        puts "Building datafile for environment: #{environment}..."
-
-        # Build the command similar to Go implementation
-        command_parts = ["cd", @project_path, "&&", "npx", "featurevisor", "build", "--environment=#{environment}", "--json"]
-        command_parts << "--target=#{target}" if target
-
-        if @options.inflate
-          command_parts << "--inflate=#{@options.inflate}"
-        end
-
-        command = command_parts.join(" ")
-
-        stdout, stderr, exit_status = execute_command(command)
-
-        if exit_status != 0
-          puts "Error: Command failed with exit code #{exit_status}"
-          puts "Command: #{command}"
-          puts "Stderr: #{stderr}"
-          exit 1
-        end
-
-        begin
-          JSON.parse(stdout, symbolize_names: true)
-        rescue JSON::ParserError => e
-          puts "Error: Failed to parse datafile JSON: #{e.message}"
-          exit 1
-        end
-      end
 
       def execute_command(command)
         stdout, stderr, exit_status = Open3.capture3(command)
+        stdout.force_encoding(Encoding::UTF_8)
+        stderr.force_encoding(Encoding::UTF_8)
         [stdout, stderr, exit_status.exitstatus]
       end
 
