@@ -235,7 +235,7 @@ RSpec.describe "sdk: child" do
     expect(child_f.get_variable_integer("test", "count")).to eq(0)
 
     expect(child_f.get_variable("test", "price")).to eq(9.99)
-    expect(child_f.get_variable_double("test", "price")).to eq(9.99)
+    expect(child_f.get_variable_number("test", "price")).to eq(9.99)
 
     expect(child_f.get_variable("test", "paymentMethods")).to eq(["paypal", "creditcard"])
     expect(child_f.get_variable_array("test", "paymentMethods")).to eq(["paypal", "creditcard"])

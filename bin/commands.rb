@@ -1,3 +1,4 @@
+require_relative "commands/node_cli"
 require_relative "commands/test"
 require_relative "commands/benchmark"
 require_relative "commands/assess_distribution"

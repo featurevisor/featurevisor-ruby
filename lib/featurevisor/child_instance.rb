@@ -10,9 +10,13 @@ module Featurevisor
       @sticky_variables = options[:sticky_variables] || {}
       @emitter = Featurevisor::Emitter.new
       @parent_unsubscribers = []
+      @closed = false
+      @evaluation_generation = 0
     end
 
     def on(event_name, callback = nil, &block)
+      return -> {} if @closed
+
       callback = block if block_given?
       if %w[context_set sticky_features_set sticky_variables_set].include?(event_name)
         return @emitter.on(event_name, callback)
@@ -33,6 +37,9 @@ module Featurevisor
     end
 
     def close
+      return if @closed
+
+      @closed = true
       @parent_unsubscribers.dup.each(&:call)
       @parent_unsubscribers.clear
       @emitter.clear_all
@@ -40,6 +47,7 @@ module Featurevisor
 
     def set_context(context, replace = false)
       @context = replace ? context : { **@context, **context }
+      @evaluation_generation += 1
       @emitter.trigger("context_set", context: @context, replaced: replace)
     end
 
@@ -50,6 +58,7 @@ module Featurevisor
     def set_sticky_features(sticky, replace = false)
       previous = @sticky_features
       @sticky_features = replace ? sticky : { **@sticky_features, **sticky }
+      @evaluation_generation += 1
       params = Featurevisor::Events.get_params_for_sticky_features_set_event(previous, @sticky_features, replace)
       @emitter.trigger("sticky_features_set", params)
     end
@@ -57,6 +66,7 @@ module Featurevisor
     def set_sticky_variables(sticky, replace = false)
       previous = @sticky_variables
       @sticky_variables = replace ? sticky : { **@sticky_variables, **sticky }
+      @evaluation_generation += 1
       @emitter.trigger(
         "sticky_variables_set",
         Featurevisor::Events.get_params_for_sticky_variables_set_event(previous, @sticky_variables, replace)
@@ -87,7 +97,7 @@ module Featurevisor
       delegate_variable(:evaluate_variable, feature_or_variable_key, variable_key_or_context, context_or_options, options)
     end
 
-    %i[boolean string integer double array object json].each do |type|
+    %i[boolean string integer number array object json].each do |type|
       define_method("get_variable_#{type}") do |feature_or_variable_key, variable_key_or_context = nil, context_or_options = {}, options = {}|
         delegate_variable("get_variable_#{type}".to_sym, feature_or_variable_key, variable_key_or_context, context_or_options, options)
       end
@@ -111,7 +121,10 @@ module Featurevisor
       {
         **options,
         __featurevisor_child_sticky_features: @sticky_features,
-        __featurevisor_child_sticky_variables: @sticky_variables
+        __featurevisor_child_sticky_variables: @sticky_variables,
+        __featurevisor_sticky_features_source: -> { @sticky_features },
+        __featurevisor_sticky_variables_source: -> { @sticky_variables },
+        __featurevisor_child_generation: -> { @evaluation_generation }
       }
     end
 

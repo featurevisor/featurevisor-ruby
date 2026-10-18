@@ -12,15 +12,15 @@ RSpec.describe Featurevisor::Modules do
       mod = Featurevisor::Modules::FeaturevisorModule.new(
         name: "test-mod",
         setup: ->(_api) {},
-        before: ->(opts) { opts.merge(test: true) },
-        after: ->(eval, opts) { eval.merge(test: true) },
+        before_evaluation: ->(opts) { opts.merge(test: true) },
+        after_evaluation: ->(eval, _opts) { eval.merge(test: true) },
         close: -> {}
       )
 
       expect(mod.name).to eq("test-mod")
       expect(mod).to respond_to(:call_setup)
-      expect(mod).to respond_to(:call_before)
-      expect(mod).to respond_to(:call_after)
+      expect(mod).to respond_to(:call_before_evaluation)
+      expect(mod).to respond_to(:call_after_evaluation)
       expect(mod).to respond_to(:call_close)
     end
 
@@ -52,10 +52,10 @@ RSpec.describe Featurevisor::Modules do
     it "should call before mod when defined" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(
         name: "test-mod",
-        before: ->(opts) { opts.merge(test: true) }
+        before_evaluation: ->(opts) { opts.merge(test: true) }
       )
 
-      result = mod.call_before({ original: true })
+      result = mod.call_before_evaluation({ original: true })
       expect(result[:test]).to be true
       expect(result[:original]).to be true
     end
@@ -63,7 +63,7 @@ RSpec.describe Featurevisor::Modules do
     it "should return original options when before mod is not defined" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(name: "test-mod")
 
-      result = mod.call_before({ original: true })
+      result = mod.call_before_evaluation({ original: true })
       expect(result[:original]).to be true
       expect(result[:test]).to be_nil
     end
@@ -105,10 +105,10 @@ RSpec.describe Featurevisor::Modules do
     it "should call after mod when defined" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(
         name: "test-mod",
-        after: ->(eval, opts) { eval.merge(test: true) }
+        after_evaluation: ->(eval, _opts) { eval.merge(test: true) }
       )
 
-      result = mod.call_after({ original: true }, { options: true })
+      result = mod.call_after_evaluation({ original: true }, { options: true })
       expect(result[:test]).to be true
       expect(result[:original]).to be true
     end
@@ -116,7 +116,7 @@ RSpec.describe Featurevisor::Modules do
     it "should return original evaluation when after mod is not defined" do
       mod = Featurevisor::Modules::FeaturevisorModule.new(name: "test-mod")
 
-      result = mod.call_after({ original: true }, { options: true })
+      result = mod.call_after_evaluation({ original: true }, { options: true })
       expect(result[:original]).to be true
       expect(result[:test]).to be_nil
     end
@@ -208,17 +208,17 @@ RSpec.describe Featurevisor::Modules do
     it "should run before modules" do
       module1 = Featurevisor::Modules::FeaturevisorModule.new(
         name: "module1",
-        before: ->(opts) { opts.merge(module1: true) }
+        before_evaluation: ->(opts) { opts.merge(module1: true) }
       )
       module2 = Featurevisor::Modules::FeaturevisorModule.new(
         name: "module2",
-        before: ->(opts) { opts.merge(module2: true) }
+        before_evaluation: ->(opts) { opts.merge(module2: true) }
       )
 
       modules_manager.add(module1)
       modules_manager.add(module2)
 
-      result = modules_manager.run_before_modules({ original: true })
+      result = modules_manager.run_before_evaluation_modules({ original: true })
       expect(result[:module1]).to be true
       expect(result[:module2]).to be true
       expect(result[:original]).to be true
@@ -263,17 +263,17 @@ RSpec.describe Featurevisor::Modules do
     it "should run after modules" do
       module1 = Featurevisor::Modules::FeaturevisorModule.new(
         name: "module1",
-        after: ->(eval, opts) { eval.merge(module1: true) }
+        after_evaluation: ->(eval, _opts) { eval.merge(module1: true) }
       )
       module2 = Featurevisor::Modules::FeaturevisorModule.new(
         name: "module2",
-        after: ->(eval, opts) { eval.merge(module2: true) }
+        after_evaluation: ->(eval, _opts) { eval.merge(module2: true) }
       )
 
       modules_manager.add(module1)
       modules_manager.add(module2)
 
-      result = modules_manager.run_after_modules({ original: true }, { options: true })
+      result = modules_manager.run_after_evaluation_modules({ original: true }, { options: true })
       expect(result[:module1]).to be true
       expect(result[:module2]).to be true
       expect(result[:original]).to be true
@@ -284,21 +284,17 @@ RSpec.describe Featurevisor::Modules do
       %w[first second].each do |name|
         modules_manager.add(Featurevisor::Modules::FeaturevisorModule.new(
           name: name,
-          before: ->(options) { order << "before:#{name}"; options },
           before_evaluation: ->(options) { order << "beforeEvaluation:#{name}"; options },
-          after_evaluation: ->(evaluation, _options) { order << "afterEvaluation:#{name}"; evaluation },
-          after: ->(evaluation, _options) { order << "after:#{name}"; evaluation }
+          after_evaluation: ->(evaluation, _options) { order << "afterEvaluation:#{name}"; evaluation }
         ))
       end
 
-      options = modules_manager.run_before_modules(type: "flag", feature_key: "test")
-      modules_manager.run_after_modules({ type: "flag", feature_key: "test" }, options)
+      options = modules_manager.run_before_evaluation_modules(type: "flag", feature_key: "test")
+      modules_manager.run_after_evaluation_modules({ type: "flag", feature_key: "test" }, options)
 
       expect(order).to eq([
-        "before:first", "before:second",
         "beforeEvaluation:first", "beforeEvaluation:second",
-        "afterEvaluation:first", "afterEvaluation:second",
-        "after:first", "after:second"
+        "afterEvaluation:first", "afterEvaluation:second"
       ])
     end
 

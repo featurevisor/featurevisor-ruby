@@ -5,7 +5,8 @@ require "json"
 module Featurevisor
   # Private datafile and matching adapter used by the evaluator.
   class InstanceEvaluationDataProvider
-    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :variables, :diagnostics, :regex_cache
+    attr_reader :schema_version, :revision, :featurevisor_version, :segments, :features, :variables, :diagnostics, :regex_cache, :normalized
+    attr_accessor :dependency_index
 
     # Initialize a new evaluation data provider.
     # @param options [Hash] Options hash containing datafile and diagnostics
@@ -21,38 +22,14 @@ module Featurevisor
       @segments = (datafile[:segments] || {}).transform_keys(&:to_sym)
       @features = (datafile[:features] || {}).transform_keys(&:to_sym)
       @variables = (datafile[:variables] || {}).transform_keys(&:to_sym)
-
-      # Transform nested structures to use symbol keys
-      @features.each do |_key, feature|
-        if feature[:variablesSchema]
-          feature[:variablesSchema] = feature[:variablesSchema].transform_keys(&:to_sym)
-        end
-        if feature[:variations]
-          feature[:variations].each do |variation|
-            if variation[:variables]
-              variation[:variables] = variation[:variables].transform_keys(&:to_sym)
-            end
-            if variation[:variableOverrides]
-              variation[:variableOverrides] = variation[:variableOverrides].transform_keys(&:to_sym)
-            end
-          end
-        end
-        if feature[:force]
-          feature[:force].each do |force_rule|
-            if force_rule[:variables]
-              force_rule[:variables] = force_rule[:variables].transform_keys(&:to_sym)
-            end
-          end
-        end
-        if feature[:traffic]
-          feature[:traffic].each do |traffic_rule|
-            if traffic_rule[:variables]
-              traffic_rule[:variables] = traffic_rule[:variables].transform_keys(&:to_sym)
-            end
-          end
-        end
-      end
+      @normalized = { feature: {}, segment: {}, variable: {} }
+      @normalization_slots = { feature: {}, segment: {}, variable: {} }
+      @normalization_mutex = Mutex.new
       @regex_cache = {}
+      @conditions_cache = {}
+      @segments_cache = {}
+      @attribute_conditions_cache = {}
+      @get_regex = method(:get_regex)
     end
 
     # Get the revision of the datafile
@@ -82,12 +59,7 @@ module Featurevisor
     # @param segment_key [String] Segment key to retrieve
     # @return [Hash, nil] Segment data or nil if not found
     def get_segment(segment_key)
-      segment = @segments[segment_key.to_sym] || @segments[segment_key]
-
-      return nil unless segment
-
-      segment[:conditions] = parse_conditions_if_stringified(segment[:conditions])
-      segment
+      read_entity(:segment, segment_key, @segments)
     end
 
     def get_segment_keys
@@ -104,7 +76,7 @@ module Featurevisor
     # @param feature_key [String] Feature key to retrieve
     # @return [Hash, nil] Feature data or nil if not found
     def get_feature(feature_key)
-      @features[feature_key.to_sym] || @features[feature_key]
+      read_entity(:feature, feature_key, @features)
     end
 
     # Get variable keys for a feature
@@ -121,7 +93,60 @@ module Featurevisor
     end
 
     def get_global_variable(variable_key)
-      @variables[variable_key.to_sym] || @variables[variable_key]
+      read_entity(:variable, variable_key, @variables)
+    end
+
+    def attribute_only_conditions?(conditions)
+      key = conditions.object_id
+      cached = @attribute_conditions_cache[key]
+      return cached[1] if cached
+
+      # Retain the syntax with its identity. Cache classification, never matches.
+      @attribute_conditions_cache[key] = [conditions, UnifiedConditions.send(:attribute_only?, conditions)]
+      @attribute_conditions_cache[key][1]
+    end
+
+    def retain_normalized(previous, incoming)
+      @normalization_mutex, @normalization_slots, @normalized = previous.normalization_snapshot
+      { feature: :features, segment: :segments, variable: :variables }.each do |kind, name|
+        (incoming[name] || {}).each_key do |key|
+          @normalization_slots[kind][key.to_sym] = []
+          @normalized[kind].delete(key.to_sym)
+        end
+      end
+    end
+
+    # Share individual cold slots, never a chain of previous providers.
+    def normalization_snapshot
+      @normalization_mutex.synchronize do
+        { feature: @features, segment: @segments, variable: @variables }.each do |kind, definitions|
+          next if @normalization_slots[kind].size == definitions.size
+          definitions.each_key { |key| @normalization_slots[kind][key] ||= [] }
+        end
+        [@normalization_mutex, @normalization_slots.transform_values(&:dup), @normalized.transform_values(&:dup)]
+      end
+    end
+
+    def read_entity(kind, key, definitions)
+      name = key.to_sym
+      cached = @normalized[kind][name]
+      return cached if cached
+      source = definitions[name] || definitions[key]
+      return nil unless source
+      errors = []
+      value = @normalization_mutex.synchronize do
+        slot = @normalization_slots[kind][name] ||= []
+        if slot.empty?
+          normalized, errors = Normalize.entity(kind, name, source)
+          slot << normalized
+        end
+        @normalized[kind][name] = slot.first
+      end
+      # Publication precedes diagnostics, and application callbacks never hold the mutex.
+      errors.each do |error|
+        @diagnostics.error(error[:message], { code: error[:code], error: error[:original_error], details: error[:details] })
+      end
+      value
     end
 
     # Check if a feature has variations
@@ -153,7 +178,7 @@ module Featurevisor
       invalid_flags = flags.delete("gimsuy")
       raise ArgumentError, "invalid regular expression flags: #{invalid_flags}" unless invalid_flags.empty?
 
-      regex = Regexp.new(regex_string, ruby_flags)
+      regex = Regexp.new(Conditions.normalize_portable_regex(regex_string), ruby_flags)
       @regex_cache[cache_key] = regex
       @regex_cache[cache_key]
     end
@@ -168,11 +193,9 @@ module Featurevisor
         return false
       end
 
-      get_regex_proc = ->(regex_string, regex_flags) { get_regex(regex_string, regex_flags) }
-
       if conditions.is_a?(Hash) && (conditions[:attribute] || conditions["attribute"])
         begin
-          result = Conditions.condition_is_matched(conditions, context, get_regex_proc)
+          result = Conditions.condition_is_matched(conditions, context, @get_regex)
           return result
         rescue => e
           @diagnostics.warn(e.message, {
@@ -186,11 +209,11 @@ module Featurevisor
       end
 
       if conditions.is_a?(Hash) && conditions[:and] && conditions[:and].is_a?(Array)
-        return conditions[:and].all? { |c| all_conditions_are_matched(c, context) }
+        return !conditions[:and].empty? && conditions[:and].all? { |c| all_conditions_are_matched(c, context) }
       end
 
       if conditions.is_a?(Hash) && conditions["and"] && conditions["and"].is_a?(Array)
-        return conditions["and"].all? { |c| all_conditions_are_matched(c, context) }
+        return !conditions["and"].empty? && conditions["and"].all? { |c| all_conditions_are_matched(c, context) }
       end
 
       if conditions.is_a?(Hash) && conditions[:or] && conditions[:or].is_a?(Array)
@@ -214,7 +237,7 @@ module Featurevisor
 
 
       if conditions.is_a?(Array)
-        return conditions.all? { |c| all_conditions_are_matched(c, context) }
+        return !conditions.empty? && conditions.all? { |c| all_conditions_are_matched(c, context) }
       end
 
       false
@@ -288,8 +311,9 @@ module Featurevisor
     # @param traffic [Array<Hash>] Traffic array to search
     # @param context [Hash] Context to evaluate against
     # @return [Hash, nil] Matched traffic or nil
-    def get_matched_traffic(traffic, context)
+    def get_matched_traffic(traffic, context, options = nil)
       traffic.find do |t|
+        next t.key?(:conditions) && UnifiedConditions.matches?(t[:conditions], options) if options
         segments = parse_segments_if_stringified(t[:segments])
         matched = all_segments_are_matched(segments, context)
         next false unless matched
@@ -314,7 +338,7 @@ module Featurevisor
     # @param feature_key [String, Hash] Feature key or feature object
     # @param context [Hash] Context to evaluate against
     # @return [Hash] Force result with force and forceIndex
-    def get_matched_force(feature_key, context)
+    def get_matched_force(feature_key, context, options = nil)
       result = {
         force: nil,
         forceIndex: nil
@@ -325,6 +349,14 @@ module Featurevisor
       return result unless feature && feature[:force]
 
       feature[:force].each_with_index do |current_force, i|
+        if options
+          if current_force.key?(:conditions) && UnifiedConditions.matches?(current_force[:conditions], options)
+            result[:force] = current_force
+            result[:forceIndex] = i
+            break
+          end
+          next
+        end
         if current_force[:conditions] && all_conditions_are_matched(
           parse_conditions_if_stringified(current_force[:conditions]), context
         )
@@ -352,9 +384,10 @@ module Featurevisor
       return conditions unless conditions.is_a?(String)
 
       return conditions if conditions == "*"
+      return @conditions_cache[conditions] if @conditions_cache.key?(conditions)
 
       begin
-        JSON.parse(conditions)
+        @conditions_cache[conditions] = JSON.parse(conditions)
       rescue => e
         @diagnostics.error("Error parsing conditions", {
           error: e,
@@ -371,10 +404,26 @@ module Featurevisor
     # @return [Array, Hash, String] Parsed segments
     def parse_segments_if_stringified(segments)
       if segments.is_a?(String) && (segments.start_with?("{") || segments.start_with?("["))
-        return JSON.parse(segments)
+        return @segments_cache[segments] if @segments_cache.key?(segments)
+
+        return @segments_cache[segments] = JSON.parse(segments)
       end
 
       segments
+    end
+
+    # Cache parsed expressions, never context dependent matching results.
+    # A new provider owns a new generation after each datafile update.
+    def clear_caches
+      @dependency_index = nil
+      @normalization_mutex.synchronize do
+        @normalized.each_value(&:clear)
+        @normalization_slots.each_value(&:clear)
+      end
+      @regex_cache.clear
+      @conditions_cache.clear
+      @segments_cache.clear
+      @attribute_conditions_cache.clear
     end
   end
 

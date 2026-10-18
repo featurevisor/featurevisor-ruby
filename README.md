@@ -1,15 +1,13 @@
 # Featurevisor Ruby SDK <!-- omit in toc -->
 
-This is a port of Featurevisor [JavaScript SDK](https://featurevisor.com/docs/sdks/javascript/) v3.x to Ruby, providing a way to evaluate feature flags, variations, and variables in your Ruby applications.
-
-This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
+Use the Featurevisor Ruby SDK to evaluate flags, variations and variables in Ruby applications.
 
 ## Table of contents <!-- omit in toc -->
 
 - [Installation](#installation)
-- [Public API](#public-api)
 - [Initialization](#initialization)
-- [Evaluation types](#evaluation-types)
+  - [Public API](#public-api)
+  - [Evaluation types](#evaluation-types)
 - [Context](#context)
   - [Setting initial context](#setting-initial-context)
   - [Setting after initialization](#setting-after-initialization)
@@ -18,10 +16,13 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 - [Check if enabled](#check-if-enabled)
 - [Getting variation](#getting-variation)
 - [Getting variables](#getting-variables)
+  - [Getting feature variables](#getting-feature-variables)
   - [Type specific methods](#type-specific-methods)
-- [Getting global variables](#getting-global-variables)
-- [Getting aggregate evaluations](#getting-aggregate-evaluations)
-- [Sticky features and variables](#sticky-features-and-variables)
+  - [Getting global variables](#getting-global-variables)
+- [Conditions](#conditions)
+- [Composition](#composition)
+- [Getting evaluations](#getting-evaluations)
+- [Sticky](#sticky)
   - [Initialize with sticky](#initialize-with-sticky)
   - [Set sticky afterwards](#set-sticky-afterwards)
 - [Setting datafile](#setting-datafile)
@@ -30,7 +31,6 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
   - [Loading datafiles on demand](#loading-datafiles-on-demand)
   - [Updating datafile](#updating-datafile)
   - [Interval-based update](#interval-based-update)
-- [Evaluation details](#evaluation-details)
 - [Diagnostics](#diagnostics)
   - [Levels](#levels)
   - [Handler](#handler)
@@ -39,6 +39,7 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
   - [`context_set`](#context_set)
   - [`sticky_features_set` and `sticky_variables_set`](#sticky_features_set-and-sticky_variables_set)
   - [`error`](#error)
+- [Evaluation details](#evaluation-details)
 - [Modules](#modules)
   - [Defining a module](#defining-a-module)
   - [Registering modules](#registering-modules)
@@ -50,6 +51,7 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
   - [Test against local monorepo's example-1](#test-against-local-monorepos-example-1)
   - [Benchmark](#benchmark)
   - [Assess distribution](#assess-distribution)
+- [GitHub repositories](#github-repositories)
 - [Development](#development)
   - [Setting up](#setting-up)
   - [Running tests](#running-tests)
@@ -60,37 +62,25 @@ This SDK is compatible with Featurevisor v3 projects and v2 datafiles.
 
 ## Installation
 
+Upgrading an existing application? Follow the [Ruby migration guide](https://featurevisor.com/docs/migrations/v4/ruby/).
+
 Add this line to your application's Gemfile:
 
 ```ruby
-gem 'featurevisor'
+gem 'featurevisor', '~> 4.0'
 ```
 
 And then execute:
 
 ```bash
-$ bundle install
+bundle install
 ```
 
 Or install it yourself as:
 
 ```bash
-$ gem install featurevisor
+gem install featurevisor -v "~> 4.0"
 ```
-
-## Public API
-
-The main runtime API is `Featurevisor.create_featurevisor`:
-
-```ruby
-f = Featurevisor.create_featurevisor(
-  datafile: datafile_content
-)
-```
-
-Most applications only need this factory and the returned `Featurevisor::Instance`. Public extension and observability APIs include modules, diagnostics, events, and the datafile structures accepted by the factory.
-
-Concurrent evaluations are safe after an instance is configured. Do not mutate or close the same instance concurrently with evaluations. Serialize calls to `set_datafile`, `set_context`, `set_sticky_features`, `set_sticky_variables`, `add_module`, `remove_module`, and `close`. Module, event, and diagnostic callbacks must synchronize mutable state that they capture.
 
 ## Initialization
 
@@ -102,8 +92,11 @@ require 'net/http'
 require 'json'
 
 # Fetch datafile from URL
-datafile_url = 'https://cdn.yoursite.com/datafile.json'
+datafile_url = 'https://cdn.yoursite.com/featurevisor-all.json'
 response = Net::HTTP.get_response(URI(datafile_url))
+unless response.is_a?(Net::HTTPSuccess)
+  raise "Datafile request failed: HTTP #{response.code}"
+end
 
 # Parse JSON with symbolized keys (required)
 datafile_content = JSON.parse(response.body, symbolize_names: true)
@@ -112,11 +105,18 @@ datafile_content = JSON.parse(response.body, symbolize_names: true)
 f = Featurevisor.create_featurevisor(
   datafile: datafile_content
 )
+begin
+  puts f.is_enabled('checkout', { userId: '123' })
+ensure
+  f.close
+end
 ```
+
+Network errors, unsuccessful HTTP responses and invalid JSON stop initialization. Handle these exceptions at your application's startup boundary.
 
 **Important**: When parsing JSON datafiles, you must use `symbolize_names: true` to ensure proper key handling by the SDK.
 
-Alternatively, you can pass a JSON string directly and the SDK will parse it automatically:
+Pass a JSON string for the SDK to parse:
 
 ```ruby
 # Option 1: Parse JSON yourself (recommended)
@@ -127,21 +127,38 @@ f = Featurevisor.create_featurevisor(datafile: datafile_content)
 f = Featurevisor.create_featurevisor(datafile: json_string)
 ```
 
-## Evaluation types
+### Public API
 
-We can evaluate 3 types of values against a particular [feature](https://featurevisor.com/docs/features/):
+The main runtime API is `Featurevisor.create_featurevisor`:
 
-- [**Flag**](#check-if-enabled) (`boolean`): whether the feature is enabled or not
-- [**Variation**](#getting-variation) (`string`): the variation of the feature (if any)
-- [**Variables**](#getting-variables): variable values of the feature (if any)
+```ruby
+f = Featurevisor.create_featurevisor(
+  datafile: datafile_content
+)
+```
+
+Most applications only need this factory and the returned `Featurevisor::Instance`. Public extension and observability APIs include modules, diagnostics, events, and the datafile structures accepted by the factory.
+
+Concurrent evaluations and a single background datafile refresh writer are supported on MRI. Warm entity reads rely on MRI's execution model. Thread safety is not guaranteed on other Ruby implementations. CI covers MRI 3.0 and 3.4. Serialize writer operations. Do not change context, sticky state or modules, or close the instance, concurrently with evaluations on other threads. Module, event, and diagnostic callbacks must synchronize mutable state that they capture.
+
+### Evaluation types
+
+Featurevisor evaluates four kinds of values:
+
+- [**Flag**](#check-if-enabled) (`true` or `false`): whether the feature is enabled or not
+- [**Variation**](#getting-variation) (`String`): the variation of the feature (if any)
+- [**Feature variable**](#getting-feature-variables): a configuration value owned by a feature
+- [**Global variable**](#getting-global-variables): a configuration value evaluated independently of a feature
 
 These evaluations are run against the provided context.
 
 ## Context
 
-Contexts are [attribute](https://featurevisor.com/docs/attributes/) values that we pass to SDK for evaluating [features](https://featurevisor.com/docs/features/) against.
+Contexts are [attribute](https://featurevisor.com/docs/attributes/) values you pass to the SDK for evaluating [features](https://featurevisor.com/docs/features/) against.
 
-Think of the conditions that you define in your [segments](https://featurevisor.com/docs/segments/), which are used in your feature's [rules](https://featurevisor.com/docs/features/#rules).
+Conditions compare these attributes using the [operators](https://featurevisor.com/docs/operators/), including `empty` and `notEmpty`.
+
+Date comparisons with `before` and `after` accept portable timestamp strings, `Time` and `DateTime`. Native values are compared by their instant and truncated to milliseconds without rounding. Both the native written year and the UTC year must be within 1 to 9999. Native offsets must have a magnitude of at most 14 hours, including any seconds or fractions supported by the type. Offsets within that limit retain their full precision. A plain `Date` is not accepted because it has no time or offset. Pass `Time.utc(2026, 1, 1)` or `'2026-01-01T00:00:00Z'` instead of `Date.new(2026, 1, 1)`. Invalid values make both operators return `false`.
 
 They are plain hashes:
 
@@ -153,11 +170,9 @@ context = {
 }
 ```
 
-Context can be passed to SDK instance in various different ways, depending on your needs:
-
 ### Setting initial context
 
-You can set context at the time of initialization:
+Set context when you create the instance:
 
 ```ruby
 require 'featurevisor'
@@ -174,7 +189,7 @@ This is useful for values that don't change too frequently and available at the 
 
 ### Setting after initialization
 
-You can also set more context after the SDK has been initialized:
+Add context later:
 
 ```ruby
 f.set_context({
@@ -186,7 +201,7 @@ This will merge the new context with the existing one (if already set).
 
 ### Replacing existing context
 
-If you wish to fully replace the existing context, you can pass `true` in second argument:
+Replace the context by passing `true` as the second argument:
 
 ```ruby
 f.set_context({
@@ -199,7 +214,7 @@ f.set_context({
 
 ### Manually passing context
 
-You can optionally pass additional context manually for each and every evaluation separately, without needing to set it to the SDK instance affecting all evaluations:
+Pass context to one evaluation without changing the instance context:
 
 ```ruby
 context = {
@@ -207,21 +222,19 @@ context = {
   country: 'nl'
 }
 
-is_enabled = f.is_enabled('my_feature', context)
-variation = f.get_variation('my_feature', context)
-variable_value = f.get_variable('my_feature', 'my_variable', context)
+is_enabled = f.is_enabled('checkout', context)
+variation = f.get_variation('checkout', context)
+variable_value = f.get_variable('checkout', 'bgColor', context)
 ```
 
 When manually passing context, it will merge with existing context set to the SDK instance before evaluating the specific value.
 
-Further details for each evaluation types are described below.
-
 ## Check if enabled
 
-Once the SDK is initialized, you can check if a feature is enabled or not:
+Check whether a feature is enabled:
 
 ```ruby
-feature_key = 'my_feature'
+feature_key = 'checkout'
 
 is_enabled = f.is_enabled(feature_key)
 
@@ -230,7 +243,7 @@ if is_enabled
 end
 ```
 
-You can also pass additional context per evaluation:
+Pass additional context to one evaluation:
 
 ```ruby
 is_enabled = f.is_enabled(feature_key, {
@@ -240,10 +253,10 @@ is_enabled = f.is_enabled(feature_key, {
 
 ## Getting variation
 
-If your feature has any [variations](https://featurevisor.com/docs/features/#variations) defined, you can evaluate them as follows:
+Evaluate a feature's [variations](https://featurevisor.com/docs/features/#variations):
 
 ```ruby
-feature_key = 'my_feature'
+feature_key = 'checkout'
 
 variation = f.get_variation(feature_key)
 
@@ -254,7 +267,7 @@ else
 end
 ```
 
-Additional context per evaluation can also be passed:
+Pass additional context to one evaluation:
 
 ```ruby
 variation = f.get_variation(feature_key, {
@@ -264,18 +277,20 @@ variation = f.get_variation(feature_key, {
 
 ## Getting variables
 
-Your features may also include [variables](https://featurevisor.com/docs/features/#variables), which can be evaluated as follows:
+### Getting feature variables
+
+Evaluate a feature's [variables](https://featurevisor.com/docs/features/#variables):
 
 ```ruby
 variable_key = 'bgColor'
 
-bg_color_value = f.get_variable('my_feature', variable_key)
+bg_color_value = f.get_variable('checkout', variable_key)
 ```
 
-Additional context per evaluation can also be passed:
+Pass additional context to one evaluation:
 
 ```ruby
-bg_color_value = f.get_variable('my_feature', variable_key, {
+bg_color_value = f.get_variable('checkout', variable_key, {
   # ...additional context
 })
 ```
@@ -288,7 +303,7 @@ Next to generic `get_variable()` methods, there are also type specific methods a
 f.get_variable_boolean(feature_key, variable_key, context = {})
 f.get_variable_string(feature_key, variable_key, context = {})
 f.get_variable_integer(feature_key, variable_key, context = {})
-f.get_variable_double(feature_key, variable_key, context = {})
+f.get_variable_number(feature_key, variable_key, context = {})
 f.get_variable_array(feature_key, variable_key, context = {})
 f.get_variable_object(feature_key, variable_key, context = {})
 f.get_variable_json(feature_key, variable_key, context = {})
@@ -296,7 +311,9 @@ f.get_variable_json(feature_key, variable_key, context = {})
 
 Type specific methods do not coerce values. `get_variable_integer` returns `nil` for the string `"1"`, and boolean getters return `nil` for non-boolean values.
 
-## Getting global variables
+`get_variable_number` reads a variable of type `number` as a `Float`, whether it holds `3` or `4.5`. Datafiles built before v4 call that type `double`, and it reads the same way. The v3 name `get_variable_double` was removed in v4.
+
+### Getting global variables
 
 Global variables use the same methods with a single variable key:
 
@@ -306,18 +323,89 @@ value = f.get_variable('checkoutSettings', context)
 evaluation = f.evaluate_variable('checkoutSettings', context)
 ```
 
-Global variables resolve sticky values first, then required features, then the first matching override, and finally their default value.
+Overrides and conditions are applied for you. See [Variables](https://featurevisor.com/docs/variables/#global-variables) and [Conditions](https://featurevisor.com/docs/conditions/) for how to define them.
 
-## Getting aggregate evaluations
+To see which overrides changed a value, inspect `variable_override_paths` in the detailed evaluation:
 
-You can get evaluations of all features available in the SDK instance:
+```ruby
+evaluation = f.evaluate_variable('runtimePolicy', country: 'nl')
+value = evaluation[:variable_value]
+matched_paths = evaluation[:variable_override_paths]
+```
+
+Treat sticky feature and variable maps, including nested values passed to the SDK or returned by modules, as read only during evaluation. Use the SDK setters to change owned sticky state.
+
+Modules should return the same result for the same input during one evaluation. Pass values that change through context.
+
+## Conditions
+
+[Conditions](https://featurevisor.com/docs/conditions/) are shared by segments, feature and global variable root gates, force entries, traffic rules and variable overrides. Generated v4 datafiles use `schemaVersion: "4"`. Arrays imply AND. Logical expressions use `and`, `or` and `not`. NOT negates the AND of its direct children. Empty expressions are false.
+
+Leaves compare context attributes, reference a segment by its literal string key, check a feature's enabled state and optional variation, or compare an evaluated variable. Feature enabled checks default to true. Variable leaves may name a feature owner and use already compiled path arrays. Dots and slashes in variable keys remain literal.
+
+For example, a compiled root gate can combine all four leaf kinds:
+
+```json
+{
+  "conditions": [
+    {"attribute": "country", "operator": "equals", "value": "nl"},
+    "eligibleAudience",
+    {"feature": "checkout", "variation": "treatment"},
+    {"variable": "policy", "path": ["items", 0, "enabled"], "operator": "equals", "value": true}
+  ]
+}
+```
+
+Continue using ordinary getters:
+
+```ruby
+enabled = f.is_enabled('checkout', country: 'nl')
+policy = f.get_variable('policy')
+```
+
+Feature evaluation checks sticky state, force, its root gate and then traffic rules. Force bypasses the gate. Global variables check sticky state and their gate before reading sources or applying overrides. A missed root gate reports `conditions_unmet` and `evaluation[:conditions]`. Variation and feature variable evaluations retain their ordinary disabled reasons and fallbacks.
+
+Conditions preserve written order and short circuit. Segments and getter dependencies share the current request session and a combined depth limit of 256 internal handoffs. Cycles and excessive depth fail the whole evaluation. Later independent calls start fresh sessions. An ordinary completed false or nil getter result remains a value.
+
+## Composition
+
+[Composed variables](https://featurevisor.com/docs/variables/#compose-values) read sources through ordinary getters with the effective context, modules and sticky state. A compiled list assembles one fresh outer hash with literal property names:
+
+```json
+{
+  "type": "object",
+  "compose": [
+    {"key": "enabled", "feature": "checkout"},
+    {"key": "assignment", "feature": "checkout", "variation": true},
+    {"key": "title", "feature": "checkout", "variable": "title"},
+    {"key": "policy", "variable": "policy"}
+  ]
+}
+```
+
+The string form, `"compose": "policy"`, is an alias of that literal global variable key. It returns the evaluated source directly, including false, zero, empty strings, arrays and nil. JSON sources are decoded exactly once, including when their decoded strings resemble JSON.
+
+```ruby
+screen = f.get_variable('screen', country: 'nl')
+details = f.evaluate_variable('screen', country: 'nl')
+```
+
+Compositions do not declare `defaultValue` or `useDefaultWhenDisabled`. They may have root `conditions` and `disabledValue`. An unmet gate skips every source and override and returns the disabled value or nil. Whole variable sticky state bypasses both assembly and overrides. Explicit defaults supplied to the outer getter are never forwarded to sources.
+
+All members are read before runtime overrides. Overrides use the existing mutation operations and provenance fields. The reason is `variable_composed`, or `variable_override_rule` when an override matches. Mutations copy changed containers without modifying source values, sibling properties or sticky values.
+
+Treat returned hashes and arrays as read only. Composition properties and aliases keep ordinary getter ownership, so descendants may be shared. Only the map composition's outer hash is guaranteed to be fresh. Ordinary source getter failures retain their normal fallbacks. Dependency failures invalidate the whole composition.
+
+## Getting evaluations
+
+Evaluate all features available in the instance:
 
 ```ruby
 all_evaluations = f.get_feature_evaluations({})
 
 puts all_evaluations
 # {
-#   myFeature: {
+#   checkout: {
 #     enabled: true,
 #     variation: "control",
 #     variables: {
@@ -340,9 +428,9 @@ Global variable values are available separately:
 global_variables = f.get_variable_evaluations({})
 ```
 
-## Sticky features and variables
+## Sticky
 
-For the lifecycle of the SDK instance in your application, you can set some features with sticky values, meaning that they will not be evaluated against the fetched [datafile](https://featurevisor.com/docs/building-datafiles/):
+Set sticky values to take precedence over feature evaluation against the [datafile](https://featurevisor.com/docs/building-datafiles/):
 
 Sticky values belong to an SDK or child instance. Feature and global variable sticky values are independent.
 
@@ -353,7 +441,7 @@ require 'featurevisor'
 
 f = Featurevisor.create_featurevisor(
   sticky_features: {
-    myFeatureKey: {
+    checkout: {
       enabled: true,
       # optional
       variation: 'treatment',
@@ -375,11 +463,11 @@ Once initialized with sticky features, the SDK will look for values there first 
 
 ### Set sticky afterwards
 
-You can also set sticky features after the SDK is initialized:
+Set sticky features after initialization:
 
 ```ruby
 f.set_sticky_features({
-  myFeatureKey: {
+  checkout: {
     enabled: true,
     variation: 'treatment',
     variables: {
@@ -407,7 +495,9 @@ f.set_datafile(datafile_content)
 f.set_datafile(json_string)
 ```
 
-**Important**: When calling `set_datafile()`, ensure JSON is parsed with `symbolize_names: true` if you're parsing it yourself.
+`set_datafile` returns `true` when the datafile is accepted, including unchanged content. It returns `false` when the datafile is rejected or the instance is closed. Rejected datafiles leave the last accepted datafile in place. Diagnostics and events keep their existing behaviour.
+
+Schema version `"2"` selectors normalize eagerly before merging. Schema version `"4"` entities normalize lazily on first read. Informational schema metadata is retained. Partial updates invalidate only incoming entities. Replacement clears normalized caches. Caller definitions are never changed.
 
 ### Merging by default
 
@@ -416,45 +506,32 @@ By default, `set_datafile(datafile)` merges the incoming datafile into the SDK's
 - top-level metadata such as `schemaVersion`, `revision`, and `featurevisorVersion` comes from the incoming datafile
 - `segments` are merged, with incoming entries overriding existing ones
 - `features` are merged, with incoming entries overriding existing ones
+- global `variables` are merged, with incoming entries overriding existing ones
 
-This means you can call `set_datafile` more than once with different datafiles, and the SDK instance accumulates their features, segments, and global variables together.
+Call `set_datafile` with different datafiles to merge their features, segments, and global variables.
 
 ### Replacing
 
 To fully replace the stored datafile, pass `true` as the second argument:
 
 ```ruby
-f.set_datafile(datafile_content, true)
+f.set_datafile(datafile_content, true) # replace
 ```
 
 ### Loading datafiles on demand
 
-Because merging is the default, a single SDK instance can start with a small datafile and load more datafiles later as your application needs them, instead of downloading every feature upfront.
-
-This pairs well with [targets](https://featurevisor.com/docs/targets/), where each target produces a smaller datafile for a specific part of your application:
+Merge datafiles for different [targets](https://featurevisor.com/docs/targets/) into the same instance. Here, the two datafile values have already been loaded and validated by your application from the same published release:
 
 ```ruby
-require "open-uri"
-
-f = Featurevisor.create_featurevisor({})
-
-def load_datafile(f, target)
-  url = "https://cdn.yoursite.com/production/featurevisor-#{target}.json"
-  datafile = JSON.parse(URI.open(url).read, symbolize_names: true)
-
-  # merges into whatever was loaded before
-  f.set_datafile(datafile)
-end
-
-load_datafile(f, "products")
-
-# later, when the user reaches checkout
-load_datafile(f, "checkout")
+f.set_datafile(products_datafile)
+f.set_datafile(checkout_datafile)
 ```
+
+Use immutable release URLs, check HTTP responses and keep shared dependencies consistent. See [Loading datafiles on demand](https://featurevisor.com/docs/use-cases/on-demand-datafiles/) for the complete loading and refresh flow.
 
 ### Updating datafile
 
-You can set the datafile as many times as you want in your application, which will result in emitting a [`datafile_set`](#datafile-set) event that you can listen and react to accordingly.
+Each accepted datafile update emits a [`datafile_set`](#datafile-set) event. Subscribe to react to updates.
 
 The triggers for setting the datafile again can be:
 
@@ -465,7 +542,7 @@ The triggers for setting the datafile again can be:
 
 ### Interval-based update
 
-Here's an example of using interval-based update:
+Replace the complete datafile on each refresh so definitions removed upstream are removed from the SDK too. Use merging only when loading partial datafiles intentionally.
 
 ```ruby
 require 'net/http'
@@ -478,7 +555,7 @@ def update_datafile(f, datafile_url)
     begin
       response = Net::HTTP.get_response(URI(datafile_url))
       datafile_content = JSON.parse(response.body)
-      f.set_datafile(datafile_content)
+      f.set_datafile(datafile_content, true) # replace
     rescue => e
       # handle error
       puts "Failed to update datafile: #{e.message}"
@@ -522,12 +599,13 @@ Every diagnostic has `:level`, `:code`, `:message`, and an object-shaped `:detai
 
 Diagnostic handlers are isolated from SDK behaviour. An exception in a handler does not stop other handlers or evaluations.
 
+Malformed stringified selectors report `conditions_parse_error` at error level once per selector per incoming entity load. Details contain exactly `conditions` with the original string, `entityType` and `entityKey`. Schema 2 diagnostics run after accepted datafile storage. V4 diagnostics run after caching the first entity read. Handlers may safely read the accepted revision again. A malformed selector fails locally, even through NOT or segment references, without rejecting the datafile or disabling unrelated entities.
 
 ## Events
 
-Featurevisor SDK implements a simple event emitter that allows you to listen to events that happen in the runtime.
+Subscribe to SDK events to respond to context, sticky state and datafile changes.
 
-You can listen to these events that can occur at various stages in your application:
+Subscribe to instance lifecycle events:
 
 ### `datafile_set`
 
@@ -548,7 +626,7 @@ end
 unsubscribe.call
 ```
 
-The `features` array will contain keys of features that have either been:
+The `features` and `variables` arrays include direct changes and transitive dependencies through conditions, segments and composition sources. They contain entities that have been:
 
 - added, or
 - updated, or
@@ -600,7 +678,7 @@ The `error` event is emitted for diagnostics reported with `level: "error"`.
 
 ## Evaluation details
 
-Besides logging with debug level enabled, you can also get more details about how the feature variations and variables are evaluated in the runtime against given context:
+Inspect how variations and variables are evaluated against a context:
 
 ```ruby
 # flag
@@ -632,14 +710,24 @@ And optionally these properties depending on whether you are evaluating a featur
 - `variable_key`: the variable key
 - `variable_value`: the variable value
 - `variable_schema`: the variable schema
+- `variable_override_index`: index of the final matched global variable override
+- `variable_override_key`: key of the final matched global variable override
+- `variable_override_path`: authoring path of the final matched global variable override
+- `variable_override_paths`: all matched authoring paths from an accumulating override
+- `conditions`: the normalized root expression when its gate is unmet
+- `variable`: the global variable definition when applicable
 
 ## Modules
 
-Modules allow you to intercept the evaluation process and customize SDK behaviour.
+The before evaluation and after evaluation phases each use the module membership at the start of that phase. Where an evaluation uses bucketing, the bucket key and bucket value phases each use their own starting membership. Adding or removing a module during a phase does not change the iteration already in progress. The next phase uses the membership then installed. A module added before the after phase can receive after callbacks for evaluations already in progress, even if it did not receive their before callbacks. A module removed before the after phase receives no after callback.
 
-For feature evaluations, all `before` callbacks run in registration order, followed by all `before_evaluation` callbacks. After evaluation and caller defaults, all `after_evaluation` callbacks run, followed by all `after` callbacks. Global variable evaluations use only `before_evaluation` and `after_evaluation`. Required feature checks run through the complete module pipeline, and transformed defaults are preserved.
+Module options expose `dependency_of` and `dependency_purpose` on internal reads. The requester contains `type`, optional `feature_key` and optional `variable_key`. Purpose is `condition` for gating reads or `composition` for consumed source values. Application calls have neither marker. Tracking modules can skip condition reads while retaining composition exposures.
 
-`before` and `after` remain available as deprecated feature-only compatibility callbacks. Use `before_evaluation` and `after_evaluation` for new modules so the same callbacks can handle feature and global variable evaluations.
+Equivalent dependency reads are memoized within one public call, separating purpose, requester, effective context and current SDK state. Condition snapshots are owned. Composition values retain ordinary getter ownership. Callback options do not retain private sessions. Independent public getters called from callbacks start fresh sessions.
+
+Modules can intercept evaluation and participate in SDK lifecycle. The canonical callbacks are `setup`, `bucket_key`, `bucket_value`, `before_evaluation`, `after_evaluation`, and `close`.
+
+`before_evaluation` and `after_evaluation` run for feature and global variable evaluations. Condition and composition dependency getters use the same module pipeline, while an accumulating override publishes only its final result to `after_evaluation`.
 
 ### Defining a module
 
@@ -710,7 +798,7 @@ The module API passed to `setup` exposes:
 
 ### Registering modules
 
-You can register modules at the time of SDK initialization:
+Register modules when you create the instance:
 
 ```ruby
 require 'featurevisor'
@@ -749,12 +837,12 @@ child_f = f.spawn({
 })
 ```
 
-Now you can pass the child instance where your individual request is being handled, and you can continue to evaluate features targeting that specific user alone:
+Pass the child instance to the request handler to evaluate features for that user:
 
 ```ruby
-is_enabled = child_f.is_enabled('my_feature')
-variation = child_f.get_variation('my_feature')
-variable_value = child_f.get_variable('my_feature', 'my_variable')
+is_enabled = child_f.is_enabled('checkout')
+variation = child_f.get_variation('checkout')
+variable_value = child_f.get_variable('checkout', 'bgColor')
 global_value = child_f.get_variable('welcomeMessage')
 ```
 
@@ -772,7 +860,7 @@ Similar to parent SDK, child instances also support several additional methods:
 - `get_variable_boolean`
 - `get_variable_string`
 - `get_variable_integer`
-- `get_variable_double`
+- `get_variable_number`
 - `get_variable_array`
 - `get_variable_object`
 - `get_variable_json`
@@ -783,78 +871,12 @@ Similar to parent SDK, child instances also support several additional methods:
 
 ## Close
 
-Both primary and child instances support a `.close()` method, that removes forgotten event listeners (via `on` method) and cleans up any potential memory leaks.
+Both primary and child instances support a `.close()` method. It removes event listeners and child subscriptions. The primary instance also closes modules, clears diagnostic subscriptions and parsed expression caches, and releases its diagnostic handler after reporting any module shutdown errors. Closing is idempotent.
+
+Ruby can collect unreachable reference cycles, but objects still referenced by your application remain alive. Call unsubscribe functions when finished with individual subscriptions, and close instances and children when finished with them. Retained instance handles still own their datafiles and context. Closing does not promise that every allocation is returned to the operating system.
 
 ```ruby
 f.close()
-```
-
-## CLI usage
-
-This package also provides a CLI tool for running your Featurevisor [project](https://featurevisor.com/docs/projects/)'s test specs and benchmarking against this Ruby SDK.
-
-- Global installation: you can access it as `featurevisor`
-- Local installation: you can access it as `bundle exec featurevisor`
-- From this repository: you can access it as `bin/featurevisor`
-
-### Test
-
-Learn more about testing [here](https://featurevisor.com/docs/testing/).
-
-```bash
-$ bundle exec featurevisor test --projectDirectoryPath="/absolute/path/to/your/featurevisor/project"
-```
-
-Additional options that are available:
-
-```bash
-$ bundle exec featurevisor test \
-  --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
-  --quiet|--verbose \
-  --onlyFailures \
-  --keyPattern="myFeatureKey" \
-  --assertionPattern="#1"
-```
-
-The Ruby test runner builds base datafiles and Target datafiles in memory via `npx featurevisor build --json`. When an assertion contains `target`, it is evaluated against the matching Target datafile.
-
-All three commands accept repeatable `--target=<target>` options. `test` builds only the selected Target datafiles and runs untargeted assertions plus assertions for those targets. `benchmark` and `assess-distribution` run independently against every selected Target datafile. Without `--target`, existing project-wide behaviour is preserved. Project definitions, test specs, Target discovery, and datafile generation continue to come from the Node.js CLI.
-
-### Test against local monorepo's example-1
-
-```bash
-$ cd /absolute/path/to/featurevisor-ruby
-$ bundle exec ruby bin/featurevisor test --projectDirectoryPath=../featurevisor/examples/example-1 --onlyFailures
-$ make test-example-1
-```
-
-### Benchmark
-
-Learn more about benchmarking [here](https://featurevisor.com/docs/cli/#benchmarking).
-
-```bash
-$ bundle exec featurevisor benchmark \
-  --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
-  --environment="production" \
-  --feature="myFeatureKey" \
-  --context='{"country": "nl"}' \
-  --n=1000
-```
-
-### Assess distribution
-
-Learn more about assessing distribution [here](https://featurevisor.com/docs/cli/#assess-distribution).
-
-```bash
-$ bundle exec featurevisor assess-distribution \
-  --projectDirectoryPath="/absolute/path/to/your/featurevisor/project" \
-  --environment=production \
-  --feature=foo \
-  --variation \
-  --context='{"country": "nl"}' \
-  --populateUuid=userId \
-  --populateUuid=deviceId \
-  --n=1000
 ```
 
 ## OpenFeature
@@ -866,10 +888,10 @@ The provider currently requires Ruby 3.4 or newer because that is the minimum ve
 Install the provider:
 
 ```ruby
-gem "featurevisor-openfeature", "~> 3.0"
+gem "featurevisor-openfeature", "~> 4.0"
 ```
 
-It installs the matching `featurevisor` gem and the official `openfeature-sdk` dependency. The provider and base SDK deliberately share the same version, and the provider requires that exact Featurevisor version.
+It installs the matching `featurevisor` gem and the official `openfeature-sdk ~> 0.6.5` dependency. The provider requires Ruby 3.4 or later, while the separate base gem supports Ruby 3.0 or later without OpenFeature. The provider and base SDK deliberately share the same version, and the provider requires that exact Featurevisor version.
 
 ```ruby
 require "featurevisor/openfeature_provider"
@@ -894,7 +916,7 @@ Use `checkout` for a flag, `checkout:variation` for its variation, `checkout:tit
 
 OpenFeature's targeting key maps to `userId` by default. `targeting_key_field`, `key_separator`, `variation_key`, and `global_variable_prefix` can customize the mapping. The global variable prefix defaults to `variable` and cannot contain the separator.
 
-You can pass any Featurevisor initialization options directly to the provider. These options are used to create the Featurevisor instance owned by the provider:
+Pass Featurevisor initialization options to the provider to configure the instance it owns:
 
 ```ruby
 provider = Featurevisor::OpenFeatureProvider.new(
@@ -905,18 +927,110 @@ provider = Featurevisor::OpenFeatureProvider.new(
 )
 ```
 
-You can also reuse an existing Featurevisor instance:
+Reuse an existing Featurevisor instance:
 
 ```ruby
-featurevisor = Featurevisor.create_featurevisor(datafile: datafile_content)
-provider = Featurevisor::OpenFeatureProvider.new(featurevisor: featurevisor)
+f = Featurevisor.create_featurevisor(datafile: datafile_content)
+provider = Featurevisor::OpenFeatureProvider.new(featurevisor: f)
 ```
 
-The caller owns an instance passed this way. Provider shutdown does not close it. Call `featurevisor.close` when every consumer is finished with it. When the provider creates the instance from options, the provider owns and closes it. If both are supplied, `featurevisor` takes precedence over the options hash.
+The caller owns an instance passed this way. Provider shutdown does not close it. Call `f.close` when every consumer is finished with it. When the provider creates the instance from options, the provider owns and closes it. If both are supplied, `featurevisor` takes precedence over the options hash.
+
+An invalid initial datafile in an owned instance fails `set_provider_and_wait` with a provider initialization error carrying `PARSE_ERROR`, independently of `log_level`. A valid datafile update clears the error and emits readiness. Shutdown removes provider subscriptions and closes only an owned instance.
+
+Root `conditions_unmet` outcomes map to OpenFeature `DISABLED`. Composed values and matched overrides map to `TARGETING_MATCH`. The provider does not decode composed JSON values again.
 
 See the [OpenFeature provider guide](https://featurevisor.com/docs/sdks/openfeature/) for resolution reasons, errors, metadata, tracking, lifecycle, and providers for other languages.
 
+## CLI usage
+
+After adding the gem to your Gemfile as shown in [Installation](#installation), install it with:
+
+```bash
+bundle install
+```
+
+Use `bundle exec featurevisor` for a bundled installation, `featurevisor` for a global gem installation, or `bin/featurevisor` from this SDK repository.
+
+The native test runner requires `@featurevisor/cli` 4.0.0 or later and Node.js 24 or later. Install the Node.js CLI in your Featurevisor project:
+
+```bash
+npm install --save-dev @featurevisor/cli@^4.0.0
+```
+
+The native CLI provides `test`, `benchmark` and `assess-distribution`. Use the Node.js CLI for authoring commands such as `init`, `lint` and `build`. Native commands delegate project parsing, test listing, matrix expansion and datafile generation to `npx featurevisor`, then evaluate with this Ruby SDK. The SDK runtime has no Node.js dependency.
+
+Options use kebab case, such as `--project-directory-path`. The camelCase forms from earlier releases still work, and `--root-directory-path` is an alias for `--project-directory-path`. Pass values as `--name=value` or `--name value`. Repeat `--target` to select several targets in order. Run `<command> --help` to list every option.
+
+Duplicate targets are evaluated once, at their first position. `--n` and `-n` accept a positive integer.
+
+### Test
+
+Segment owners and checks run through ordinary SDK gates, including feature and variable dependencies, fixed `at`, context, sticky state and child state. Selected Target segment specializations remain authoritative. Compiled execution definitions restore only missing segments. Attribute only chains may run without an environment. Dependent segments require their selected datafile. Transitive references are preflighted before getters run. Synthetic gates are excluded from coverage. Testing does not automatically run lint.
+
+```bash
+bundle exec featurevisor test \
+  --project-directory-path=/path/to/featurevisor-project \
+  --only-failures
+```
+
+See [Testing](https://featurevisor.com/docs/testing/) for authoring specs and [Checks](https://featurevisor.com/docs/testing/#checks) for check syntax and operators.
+
+Useful test options:
+
+- `--key-pattern=<pattern>` and `--assertion-pattern=<pattern>` filter tests.
+- `--entity-type=scenario` selects scenarios. `--set=<set>` selects one project set. Omitting `--set` runs all sets.
+- `--case=<id>` reruns one expanded case. Copy the opaque ID or rerun command from a failure report.
+- `--json --pretty` produces an indented JSON report.
+- `--coverage` reports observed rule and override selections. `--uncovered` lists features and global variables without associated specs.
+- `--only-failures`, `--quiet`, `--verbose` and `--show-datafile` control diagnostic output.
+
+Printed rerun commands use POSIX shell quoting. JSON reports also include raw argument arrays.
+
+### Test against local monorepo's example-1
+
+Contributor instructions are in the [repository development guide](https://github.com/featurevisor/featurevisor-ruby#development).
+
+### Benchmark
+
+The examples below use a project without environments. Add `--environment=<name>` if your project configures environments. In a sets project, omit `--set` to run every set or pass `--set=<name>`. Repeat `--target=<key>` to evaluate specific target datafiles. The Node.js CLI validates these options and builds the datafiles. Ruby evaluates them. Replace `checkout` with a feature defined in your project.
+
+```bash
+bundle exec featurevisor benchmark \
+  --project-directory-path=/path/to/featurevisor-project \
+  --feature=checkout \
+  --context='{"country":"nl"}' \
+  --n=1000
+```
+
+Use `--variation` for a variation or `--variable=<key>` for a feature variable. Omit `--feature` to benchmark a global variable. Do not combine `--variation` with `--variable`. See [Benchmarking](https://featurevisor.com/docs/cli/#benchmarking).
+
+### Assess distribution
+
+```bash
+bundle exec featurevisor assess-distribution \
+  --project-directory-path=/path/to/featurevisor-project \
+  --feature=checkout \
+  --populate-uuid=userId \
+  --n=1000
+```
+
+Repeat `--populate-uuid=<key>` to generate UUID values for multiple context attributes. Supply one key per option. See [Assess distribution](https://featurevisor.com/docs/cli/#assess-distribution).
+
+## GitHub repositories
+
+- SDK: [featurevisor/featurevisor-ruby](https://github.com/featurevisor/featurevisor-ruby)
+- Example application: [featurevisor/featurevisor-example-ruby](https://github.com/featurevisor/featurevisor-example-ruby)
+
 <!-- FEATUREVISOR_DOCS_END -->
+
+<a id="getting-aggregate-evaluations"></a>
+
+The aggregate evaluation reference has moved to [Getting evaluations](#getting-evaluations).
+
+<a id="sticky-features-and-variables"></a>
+
+The sticky state reference has moved to [Sticky](#sticky).
 
 ## Development
 
@@ -932,6 +1046,8 @@ $ make test-base
 $ make test-example-1
 ```
 
+Run `bundle exec rspec spec/readme_initialization_spec.rb` to execute the actual initialization snippet with simulated HTTP responses and transport errors. This check also runs in the ordinary SDK suite and CI.
+
 Build and verify both gems with:
 
 ```bash
@@ -942,11 +1058,13 @@ The build produces `featurevisor-VERSION.gem` and `featurevisor-openfeature-VERS
 
 ### Releasing
 
+The next breaking release is `4.0.0` for both gems. Keep both Gemfile lockfiles aligned with the shared version. Run `make test`, `make test-base` and `make build` before tagging. The artefact check verifies the provider's exact dependency on the base gem and their separate contents.
+
 - Update the shared version in `lib/featurevisor/version.rb`
 - Run `bundle install`
 - Push commit to `main` branch
 - Wait for CI to complete
-- Tag the release with the same version number, for example `v3.1.0`
+- Tag the release with the same version number, for example `vX.Y.Z`
 - The workflow verifies that the tag matches the shared version
 - The workflow publishes `featurevisor` first, followed by `featurevisor-openfeature`
 

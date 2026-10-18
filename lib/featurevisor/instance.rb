@@ -35,6 +35,8 @@ module Featurevisor
       @sticky_features = options[:sticky_features] || options[:stickyFeatures] || {}
       @sticky_variables = options[:sticky_variables] || options[:stickyVariables] || {}
       @closed = false
+      @evaluation_generation = 0
+      @datafile_mutex = Mutex.new
       @module_diagnostic_subscriptions = []
 
       # datafile
@@ -47,6 +49,7 @@ module Featurevisor
         modules: options[:modules] || [],
         report_diagnostic: method(:report_diagnostic),
         module_api_factory: method(:create_module_api),
+        on_change: method(:invalidate_evaluation_memo),
         clear_module_diagnostic_subscriptions: method(:clear_module_diagnostic_subscriptions)
       )
 
@@ -68,6 +71,8 @@ module Featurevisor
     end
 
     def handle_evaluation_diagnostic(level, message, details = nil)
+      return unless diagnostic_interested?(level)
+
       details = (details || {}).dup
       code = details.delete(:code) || details.delete("code") || details[:reason] || details["reason"] || message
       code = "deprecated_feature" if message == "feature is deprecated"
@@ -97,8 +102,9 @@ module Featurevisor
     # Set the datafile
     # @param datafile [Hash, String] Datafile content or JSON string
     # @param replace [Boolean] Whether to replace instead of merge
+    # @return [Boolean] Whether the datafile was accepted, even if unchanged
     def set_datafile(datafile, replace = false)
-      return if @closed
+      return false if @closed
 
       begin
         parsed_datafile = if datafile.is_a?(String)
@@ -114,14 +120,26 @@ module Featurevisor
                (!parsed_datafile.key?(:variables) || parsed_datafile[:variables].is_a?(Hash))
           raise ArgumentError, "Invalid datafile"
         end
-        next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile.get_datafile, parsed_datafile)
-        new_datafile = InstanceEvaluationDataProvider.new(
-          datafile: next_datafile,
-          diagnostics: @diagnostics
-        )
+        normalization_errors = []
+        if parsed_datafile[:schemaVersion] == "2"
+          parsed_datafile, normalization_errors = Normalize.datafile(parsed_datafile)
+        end
+        # Serialize merge and publication, leaving application callbacks outside.
+        details = @datafile_mutex.synchronize do
+          return false if @closed
+          next_datafile = replace ? parsed_datafile : merge_datafiles(@datafile.get_datafile, parsed_datafile)
+          new_datafile = InstanceEvaluationDataProvider.new(
+            datafile: next_datafile,
+            diagnostics: @diagnostics
+          )
+          new_datafile.retain_normalized(@datafile, parsed_datafile) unless replace
+          event = Featurevisor::Events.get_params_for_datafile_set_event(@datafile, new_datafile, replace, parsed_datafile)
+          @datafile = new_datafile
+          @evaluation_generation += 1
+          event
+        end
 
-        details = Featurevisor::Events.get_params_for_datafile_set_event(@datafile, new_datafile, replace)
-        @datafile = new_datafile
+        normalization_errors.each { |diagnostic| report_diagnostic(diagnostic) }
 
         report_diagnostic(
           level: "info",
@@ -130,6 +148,7 @@ module Featurevisor
           details: details
         )
         @emitter.trigger("datafile_set", details)
+        true
       rescue => e
         report_diagnostic(
           level: "error",
@@ -137,6 +156,7 @@ module Featurevisor
           message: "Could not parse datafile",
           original_error: e
         )
+        false
       end
     end
 
@@ -156,6 +176,7 @@ module Featurevisor
       end
 
       params = Featurevisor::Events.get_params_for_sticky_features_set_event(previous_sticky_features, @sticky_features, replace)
+      @evaluation_generation += 1
 
       report_diagnostic(
         level: "info",
@@ -169,6 +190,7 @@ module Featurevisor
     def set_sticky_variables(sticky, replace = false)
       previous = @sticky_variables || {}
       @sticky_variables = replace ? sticky : { **@sticky_variables, **sticky }
+      @evaluation_generation += 1
       params = Featurevisor::Events.get_params_for_sticky_variables_set_event(previous, @sticky_variables, replace)
       report_diagnostic(level: "info", code: "sticky_variables_set", message: "Sticky variables set", details: params)
       @emitter.trigger("sticky_variables_set", params)
@@ -214,6 +236,11 @@ module Featurevisor
       @modules_manager.add(mod)
     end
 
+    def invalidate_evaluation_memo
+      @evaluation_generation += 1
+    end
+    private :invalidate_evaluation_memo
+
     def remove_module(name)
       @modules_manager.remove(name)
     end
@@ -230,12 +257,15 @@ module Featurevisor
 
     # Close the instance
     def close
-      return if @closed
-
-      @closed = true
+      @datafile_mutex.synchronize do
+        return if @closed
+        @closed = true
+      end
       @modules_manager.close_all
       @module_diagnostic_subscriptions = []
       @emitter.clear_all
+      @on_diagnostic = nil
+      @datafile.clear_caches
     end
 
     # Set context
@@ -247,6 +277,7 @@ module Featurevisor
       else
         @context = { **@context, **context }
       end
+      @evaluation_generation += 1
 
       @emitter.trigger("context_set", {
         context: @context,
@@ -315,6 +346,7 @@ module Featurevisor
         evaluation = evaluate_flag(feature_key, context, options)
         evaluation[:enabled] == true
       rescue => e
+        raise if e.is_a?(RequirementError) && options[:__featurevisor_prerequisite]
         report_diagnostic(level: "error", code: "evaluation_error", message: "isEnabled failed", originalError: e, details: { featureKey: feature_key })
         false
       end
@@ -351,6 +383,7 @@ module Featurevisor
           nil
         end
       rescue => e
+        raise if e.is_a?(RequirementError) && options[:__featurevisor_prerequisite]
         report_diagnostic(level: "error", code: "evaluation_error", message: "getVariation failed", originalError: e, details: { featureKey: feature_key })
         nil
       end
@@ -389,7 +422,7 @@ module Featurevisor
 
         if evaluation.key?(:variable_value)
           variable_type = evaluation.dig(:variable_schema, :type) || evaluation.dig(:variable, :type)
-          if variable_type == "json" &&
+          if variable_type == "json" && !evaluation[:__featurevisor_decoded_json] && !evaluation.dig(:variable, :compose) &&
              evaluation[:variable_value].is_a?(String)
             JSON.parse(evaluation[:variable_value], symbolize_names: true)
           else
@@ -399,6 +432,8 @@ module Featurevisor
           nil
         end
       rescue => e
+        getter_options = variable_key_or_context.is_a?(String) ? options : context_or_options
+        raise if e.is_a?(RequirementError) && getter_options[:__featurevisor_prerequisite]
         report_diagnostic(level: "error", code: "evaluation_error", message: "getVariable failed", originalError: e, details: { variableKey: variable_key_or_context || feature_or_variable_key })
         nil
       end
@@ -437,15 +472,15 @@ module Featurevisor
       get_value_by_type(variable_value, "integer")
     end
 
-    # Get variable as double
+    # Get variable as a number, whole or fractional
     # @param feature_key [String] Feature key
     # @param variable_key [String] Variable key
     # @param context [Hash] Context
     # @param options [Hash] Override options
     # @return [Float, nil] Float value or nil
-    def get_variable_double(*args)
+    def get_variable_number(*args)
       variable_value = get_variable(*args)
-      get_value_by_type(variable_value, "double")
+      get_value_by_type(variable_value, "number")
     end
 
     # Get variable as array
@@ -538,14 +573,24 @@ module Featurevisor
       evaluation_options = {
         type: "variable",
         variable_key: variable_key.to_s,
-        context: get_context(context)
+        context: options[:__featurevisor_effective_context] ? context : get_context(context)
       }
+      session = options[:__featurevisor_session] || EvaluationSession.new
+      evaluation_options[:dependency_of] = session.dependency_of if options[:__featurevisor_prerequisite]
+      evaluation_options[:dependency_purpose] = options[:dependency_purpose] || "condition" if options[:__featurevisor_prerequisite]
       evaluation_options[:default_variable_value] = options[:default_variable_value] if options.key?(:default_variable_value)
       begin
-        evaluation_options = @modules_manager.run_before_evaluation_modules(evaluation_options)
+        # Only prerequisite entries fingerprint effective dependency inputs.
+        session_options = options[:__featurevisor_prerequisite] ? global_variable_session_options(evaluation_options, options) : evaluation_options
+        return session.run(session_options,
+                           prerequisite: options[:__featurevisor_prerequisite]) do
+        unless @modules_manager.get_all.empty?
+          evaluation_options = @modules_manager.run_before_evaluation_modules(evaluation_options)
+        end
+        session.update_current(evaluation_options)
         resolved_key = evaluation_options[:variable_key]
         variable = @datafile.get_global_variable(resolved_key)
-        sticky = options[:__featurevisor_child_sticky_variables] || @sticky_variables
+        sticky = options[:__featurevisor_sticky_variables_source]&.call || options[:__featurevisor_child_sticky_variables] || @sticky_variables
         evaluation = { type: "variable", variable_key: resolved_key, reason: Featurevisor::EvaluationReason::VARIABLE_NOT_FOUND }
 
         if sticky.key?(resolved_key) || sticky.key?(resolved_key.to_sym)
@@ -553,28 +598,49 @@ module Featurevisor
           evaluation.merge!(reason: Featurevisor::EvaluationReason::STICKY, variable: variable,
                             variable_value: sticky_value)
         elsif variable
-          unless required_features_are_matched(variable[:requiredFeatures], evaluation_options[:context], options)
-            value_key = variable[:useDefaultWhenDisabled] ? :defaultValue : :disabledValue
-            evaluation.merge!(reason: Featurevisor::EvaluationReason::REQUIRED_FEATURES_UNMET,
-                              variable: variable)
+          dependencies = get_evaluation_dependencies(evaluation_options[:context], options.merge(__featurevisor_effective_context: true, __featurevisor_session: session))
+          if variable.key?(:conditions) && !UnifiedConditions.matches?(variable[:conditions], dependencies)
+            value_key = !variable[:compose] && variable[:useDefaultWhenDisabled] ? :defaultValue : :disabledValue
+            evaluation.merge!(reason: Featurevisor::EvaluationReason::CONDITIONS_UNMET,
+                              conditions: variable[:conditions], variable: variable)
             evaluation[:variable_value] = variable[value_key] if variable.key?(value_key)
+            evaluation[:variable_value] = nil if variable[:compose] && !variable.key?(value_key)
+            if variable[:compose].is_a?(Array) && evaluation[:variable_value].is_a?(Hash)
+              evaluation[:variable_value] = evaluation[:variable_value].dup
+            end
           else
-            (variable[:overrides] || []).each_with_index do |override, index|
-              next unless required_features_are_matched(override[:requiredFeatures], evaluation_options[:context], options)
-              conditions_match = !override[:conditions] || @datafile.all_conditions_are_matched(
-                @datafile.parse_conditions_if_stringified(override[:conditions]), evaluation_options[:context]
-              )
-              segments_match = !override[:segments] || @datafile.all_segments_are_matched(
-                @datafile.parse_segments_if_stringified(override[:segments]), evaluation_options[:context]
-              )
-              next unless conditions_match && segments_match
-
-              evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE,
-                                variable: variable,
-                                variable_override_index: index, variable_override_key: override[:key],
-                                variable_override_path: override[:keyPath])
-              evaluation[:variable_value] = override[:value] if override.key?(:value)
-              break
+            if variable[:compose]
+              evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_COMPOSED,
+                                variable: variable, variable_value: compose_value(variable[:compose], dependencies))
+            end
+            program = variable[:overrideProgram]
+            overrides = program || (variable[:compose] ? [] : variable[:overrides]) || []
+            accumulated_value = variable[:compose] ? evaluation[:variable_value] : variable[:defaultValue]
+            applied_paths = []
+            index = 0
+            while index < overrides.length
+              override = overrides[index]
+              matched = !override.key?(:conditions) || UnifiedConditions.matches?(override[:conditions], dependencies)
+              if matched
+                if program
+                  accumulated_value = Mutations.apply(accumulated_value, override[:operations])
+                  if variable[:compose].is_a?(Array) && override[:operations].any? { |operation| operation[:op] == "set" && operation[:path].empty? }
+                    accumulated_value = accumulated_value.dup
+                  end
+                  applied_paths << (override[:keyPath] || [override[:key]])
+                end
+                evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_OVERRIDE_RULE,
+                                  variable: variable, variable_override_index: index,
+                                  variable_override_key: override[:key], variable_override_path: override[:keyPath])
+                evaluation[:variable_value] = program ? accumulated_value : override[:value]
+                evaluation[:variable_override_paths] = applied_paths.dup if program
+                break unless program
+              end
+              next_index = program ? override[matched ? :onMatch : :onMiss] : index + 1
+              if program && (!next_index.is_a?(Integer) || next_index <= index || next_index > overrides.length)
+                raise ArgumentError, "Invalid variable override program jump"
+              end
+              index = next_index
             end
             if evaluation[:reason] == Featurevisor::EvaluationReason::VARIABLE_NOT_FOUND
               evaluation.merge!(reason: Featurevisor::EvaluationReason::VARIABLE_DEFAULT,
@@ -582,43 +648,137 @@ module Featurevisor
               evaluation[:variable_value] = variable[:defaultValue] if variable.key?(:defaultValue)
             end
           end
-          report_diagnostic(level: "warn", code: "variable_deprecated", message: "Variable \"#{resolved_key}\" is deprecated",
+          report_diagnostic(level: "warn", code: "deprecated_variable", message: "Variable \"#{resolved_key}\" is deprecated",
                             details: { variableKey: resolved_key, evaluation: evaluation }) if variable[:deprecated]
         end
 
         if !evaluation.key?(:variable_value) && evaluation_options.key?(:default_variable_value)
           evaluation[:variable_value] = evaluation_options[:default_variable_value]
         end
-        evaluation = @modules_manager.run_global_after_modules(evaluation, evaluation_options)
+        unless @modules_manager.get_all.empty?
+          evaluation = @modules_manager.run_after_evaluation_modules(evaluation, evaluation_options)
+        end
         report_diagnostic(level: "debug", code: evaluation[:reason], message: "Global variable evaluated", details: evaluation)
         evaluation
+        end
       rescue => e
+        raise if e.is_a?(RequirementError) && options[:__featurevisor_prerequisite]
         evaluation = { type: "variable", variable_key: evaluation_options[:variable_key],
                        reason: Featurevisor::EvaluationReason::ERROR, error: e }
+        session.remember(global_variable_session_options(evaluation_options, options).merge(__featurevisor_prerequisite: true), evaluation) if options[:__featurevisor_prerequisite]
         report_diagnostic(level: "error", code: "evaluation_error", message: "Global variable evaluation failed",
                           originalError: e, details: evaluation)
         evaluation
       end
     end
 
-    def required_features_are_matched(requirements, context, options)
-      return true if requirements.nil?
+    def global_variable_session_options(evaluation_options, options)
+      evaluation_options.merge(
+        sticky: options[:__featurevisor_sticky_features_source]&.call || options[:__featurevisor_child_sticky_features] || @sticky_features,
+        sticky_variables: options[:__featurevisor_sticky_variables_source]&.call || options[:__featurevisor_child_sticky_variables] || @sticky_variables,
+        datafile: @datafile,
+        __featurevisor_generation: -> { @evaluation_generation },
+        __featurevisor_child_generation: options[:__featurevisor_child_generation],
+        __featurevisor_project_variable: options[:__featurevisor_project_variable]
+      )
+    end
 
-      items = requirements.is_a?(Array) ? requirements : [requirements]
-      clean_options = options.reject { |key, _| %i[default_variation_value default_variable_value].include?(key) }
-      items.all? do |required|
-        if required.is_a?(String)
-          key = required
-          expected_enabled = true
-          expected_variation = nil
-        else
-          key = required[:feature]
-          expected_enabled = required.key?(:enabled) ? required[:enabled] : true
-          expected_variation = required[:variation]
-        end
-        next false unless is_enabled(key, context, clean_options) == expected_enabled
-        expected_variation.nil? || get_variation(key, context, clean_options) == expected_variation
+    def project_variable_dependency(evaluation)
+      return evaluation unless evaluation.key?(:variable_value)
+      type = evaluation.dig(:variable_schema, :type) || evaluation.dig(:variable, :type)
+      return evaluation unless type == "json" && !evaluation.dig(:variable, :compose) && evaluation[:variable_value].is_a?(String)
+
+      evaluation.merge(variable_value: JSON.parse(evaluation[:variable_value], symbolize_names: true), __featurevisor_decoded_json: true)
+    rescue JSON::ParserError => error
+      report_diagnostic(level: "error", code: "evaluation_error", message: "getVariable failed", originalError: error,
+                        details: { featureKey: evaluation[:feature_key], variableKey: evaluation[:variable_key] })
+      evaluation.merge(variable_value: nil, __featurevisor_decoded_json: true)
+    end
+
+    def evaluate_required_variable(required, dependencies)
+        options = {
+        __featurevisor_sticky_features_source: dependencies[:__featurevisor_sticky_features_source],
+        __featurevisor_sticky_variables_source: dependencies[:__featurevisor_sticky_variables_source],
+        __featurevisor_child_generation: dependencies[:__featurevisor_child_generation],
+        __featurevisor_session: dependencies[:__featurevisor_session],
+        __featurevisor_prerequisite: true,
+        __featurevisor_effective_context: true,
+        dependency_purpose: "condition",
+        __featurevisor_project_variable: method(:project_variable_dependency)
+      }
+      if required[:feature]
+        get_variable(required[:feature], required[:variable], dependencies[:context], options)
+      else
+        get_variable(required[:variable], dependencies[:context], options)
       end
+    end
+
+    def composition_source(reference, dependencies)
+      context = dependencies[:context]
+      options = {
+        __featurevisor_session: dependencies[:__featurevisor_session],
+        __featurevisor_prerequisite: true,
+        __featurevisor_effective_context: true,
+        __featurevisor_sticky_features_source: dependencies[:__featurevisor_sticky_features_source],
+        __featurevisor_sticky_variables_source: dependencies[:__featurevisor_sticky_variables_source],
+        __featurevisor_child_generation: dependencies[:__featurevisor_child_generation],
+        dependency_purpose: "composition",
+        __featurevisor_project_variable: method(:project_variable_dependency)
+      }
+      if reference.key?(:variable)
+        reference.key?(:feature) ? get_variable(reference[:feature], reference[:variable], context, options) : get_variable(reference[:variable], context, options)
+      elsif reference[:variation]
+        get_variation(reference[:feature], context, options)
+      else
+        is_enabled(reference[:feature], context, options)
+      end
+    end
+
+    def compose_value(compose, dependencies)
+      return composition_source({ variable: compose }, dependencies) if compose.is_a?(String)
+      raise RequirementError, "Invalid composition" unless compose.is_a?(Array) && !compose.empty?
+      compose.each_with_object({}) do |reference, result|
+        key = reference[:key]
+        if !key.is_a?(String) || key.empty? || %w[__proto__ prototype constructor].include?(key)
+          raise RequirementError, "Invalid composition property"
+        end
+        result[key.to_sym] = composition_source(reference, dependencies)
+      end
+    end
+
+    def variable_condition_matches?(required, dependencies)
+      value = evaluate_required_variable(required, dependencies)
+      if required.key?(:path)
+        raise ArgumentError, "Variable requirement path must be compiled" unless required[:path].is_a?(Array)
+        required[:path].each do |part|
+          raise ArgumentError, "Unsafe variable requirement path" if %w[__proto__ prototype constructor].include?(part)
+          index = Mutations.send(:array_index, part)
+          if part.is_a?(Numeric) && index.nil?
+            raise ArgumentError, "Invalid variable requirement path"
+          end
+          value = if !index.nil?
+                    value.is_a?(Array) && index < value.length ? value[index] : Conditions.missing_value
+                  elsif part.is_a?(String)
+                    if value.is_a?(Hash)
+                      key = value.key?(part.to_sym) ? part.to_sym : part
+                      value.key?(key) ? value[key] : Conditions.missing_value
+                    elsif value.is_a?(Array) && part == "length"
+                      value.length
+                    elsif value.is_a?(Array) && part.match?(/\A(?:0|[1-9]\d*)\z/) && part.to_i < value.length
+                      value[part.to_i]
+                    else
+                      Conditions.missing_value
+                    end
+                  else
+                    raise ArgumentError, "Invalid variable requirement path"
+                  end
+        end
+      end
+      Conditions.value_is_matched(value, required, ->(pattern, flags) { @datafile.get_regex(pattern, flags) })
+    rescue RequirementError
+      raise
+    rescue => error
+      raise RequirementError, error.message
     end
 
     # Get evaluation dependencies
@@ -626,14 +786,29 @@ module Featurevisor
     # @param options [Hash] Override options
     # @return [Hash] Evaluation dependencies
     def get_evaluation_dependencies(context, options = {})
+      sticky_source = options[:__featurevisor_sticky_features_source] ||
+                      -> { options[:__featurevisor_child_sticky_features] || @sticky_features }
+      variable_source = options[:__featurevisor_sticky_variables_source] ||
+                        -> { options[:__featurevisor_child_sticky_variables] || @sticky_variables }
       {
-        context: get_context(context),
+        context: options[:__featurevisor_effective_context] ? context : get_context(context),
         diagnostics: @diagnostics,
         modules_manager: @modules_manager,
         datafile: @datafile,
-        sticky: options[:__featurevisor_child_sticky_features] || @sticky_features,
-        sticky_variables: options[:__featurevisor_child_sticky_variables] || @sticky_variables,
+        __featurevisor_instance: self,
+        sticky: sticky_source.call,
+        sticky_variables: variable_source.call,
+        __featurevisor_project_variable: options[:__featurevisor_project_variable],
+        __featurevisor_session: options[:__featurevisor_session],
+        __featurevisor_prerequisite: options[:__featurevisor_prerequisite],
+        __featurevisor_generation: -> { @evaluation_generation },
+        __featurevisor_child_generation: options[:__featurevisor_child_generation],
+        __featurevisor_sticky_features_source: sticky_source,
+        __featurevisor_sticky_variables_source: variable_source,
+        __featurevisor_datafile_source: -> { @datafile },
       }.tap do |dependencies|
+        dependencies[:dependency_purpose] = options[:dependency_purpose] if options[:dependency_purpose]
+        dependencies[:dependency_of] = options[:__featurevisor_session].dependency_of if options[:__featurevisor_prerequisite] && options[:__featurevisor_session]
         dependencies[:default_variation_value] = options[:default_variation_value] if options.key?(:default_variation_value)
         dependencies[:default_variable_value] = options[:default_variable_value] if options.key?(:default_variable_value)
       end
@@ -652,7 +827,7 @@ module Featurevisor
       when "integer"
         return value if value.is_a?(Integer)
         value.is_a?(Float) && value.finite? && value == value.to_i ? value.to_i : nil
-      when "double"
+      when "number"
         value.is_a?(Numeric) && value.finite? ? value.to_f : nil
       when "boolean"
         value == true || value == false ? value : nil
@@ -696,6 +871,8 @@ module Featurevisor
       {
         get_revision: -> { instance.get_revision },
         on_diagnostic: lambda do |handler, options = {}|
+          next -> {} if @closed
+
           subscription = {
             id: SecureRandom.uuid,
             module_id: mod.id,
@@ -714,6 +891,8 @@ module Featurevisor
     end
 
     def report_diagnostic(diagnostic, source_module = nil)
+      return unless diagnostic_interested?((diagnostic || {})[:level] || "info", source_module)
+
       diagnostic = (diagnostic || {}).dup
       diagnostic[:level] ||= "info"
       diagnostic[:module] = source_module.name if source_module && source_module.name
@@ -771,6 +950,26 @@ module Featurevisor
 
       subscriber_index >= diagnostic_index
     end
+
+    # Check live subscriptions before copying and formatting evaluation details.
+    # Errors also reach the error event, independently of diagnostic levels.
+    def diagnostic_interested?(level, source_module = nil)
+      return true if level == "error"
+
+      # The default console reporter and explicit handlers have historically
+      # handled unrecognized levels differently. Preserve both policies.
+      instance_interested = if @on_diagnostic
+                              should_report_diagnostic?(level, @diagnostics.level)
+                            else
+                              LOG_LEVELS.index(level).to_i <= LOG_LEVELS.index(@diagnostics.level).to_i
+                            end
+      instance_interested ||
+        @module_diagnostic_subscriptions.any? do |subscription|
+          (!source_module || subscription[:module_id] != source_module.id) &&
+            should_report_diagnostic?(level, subscription[:level])
+        end
+    end
+    private :diagnostic_interested?
 
     def camelize_diagnostic_value(value)
       case value

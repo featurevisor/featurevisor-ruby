@@ -5,8 +5,9 @@ require "featurevisor"
 
 RSpec.describe "Featurevisor v3 conformance" do
   it "uses the shared inclusive allocation contract" do
-    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
-    expect(fixture[:version]).to eq(6)
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
+    expect(fixture[:version]).to eq(15)
+    expect(fixture[:conditionCases].length).to eq(189)
     reader = Featurevisor.const_get(:InstanceEvaluationDataProvider).new(
       datafile: { schemaVersion: "2", revision: "conformance", segments: {}, features: {} },
       diagnostics: Featurevisor.const_get(:DiagnosticReporter).new(level: "fatal")
@@ -40,11 +41,14 @@ RSpec.describe "Featurevisor v3 conformance" do
       ).to eq(test_case[:expected]), "pattern #{test_case[:pattern]}, flags #{test_case[:flags]}"
     end
 
+    executed_any = 0
     fixture[:conditionCases].each do |test_case|
       expect(
         reader.all_conditions_are_matched(test_case[:condition], test_case[:context])
       ).to eq(test_case[:expected]), test_case[:name]
+      executed_any += 1 if JSON.generate(test_case[:condition]).match?(/includesAny|notIncludesAny/)
     end
+    expect(executed_any).to eq(73)
 
     aggregate_case = fixture.dig(:defaults, :aggregateCase)
     featurevisor = Featurevisor.create_featurevisor(datafile: aggregate_case[:datafile], log_level: "fatal")
@@ -58,7 +62,7 @@ RSpec.describe "Featurevisor v3 conformance" do
   end
 
   it "evaluates every shared global variable case" do
-    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
     globals = fixture[:globalVariables]
 
     globals[:cases].each do |test_case|
@@ -107,7 +111,7 @@ RSpec.describe "Featurevisor v3 conformance" do
   end
 
   it "supports canonical required features for flags and feature variable overrides" do
-    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
     required = fixture[:requiredFeatures]
     f = Featurevisor.create_featurevisor(datafile: required[:datafile], log_level: "fatal")
 
@@ -120,8 +124,90 @@ RSpec.describe "Featurevisor v3 conformance" do
     expect(evaluation[:variable_override_key]).to eq(test_case[:expectedOverrideKey])
   end
 
+  it "verifies every canonical prerequisite evaluation detail" do
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
+    required = fixture.fetch(:requiredFeatures)
+    cases = required.fetch(:evaluationCases)
+    expect(cases).not_to be_empty
+    sdk = Featurevisor.create_featurevisor(datafile: required.fetch(:datafile), log_level: "fatal")
+
+    cases.each do |test_case|
+      context = test_case.fetch(:context, {})
+      evaluation = case test_case.fetch(:type)
+      when "flag"
+        sdk.evaluate_flag(test_case.fetch(:feature), context)
+      when "variation"
+        sdk.evaluate_variation(test_case.fetch(:feature), context)
+      when "variable"
+        if test_case.key?(:feature)
+          sdk.evaluate_variable(test_case.fetch(:feature), test_case.fetch(:variable), context)
+        else
+          sdk.evaluate_variable(test_case.fetch(:variable), context)
+        end
+      else
+        raise "Unknown evaluation type: #{test_case[:type]}"
+      end
+
+      test_case.fetch(:expected).each do |field, expected|
+        native_field = field.to_s.gsub(/([a-z])([A-Z])/, '\1_\2').downcase.to_sym
+        expect(evaluation).to have_key(native_field), test_case.fetch(:name)
+        expect(evaluation[native_field]).to eq(expected), "#{test_case.fetch(:name)}: #{field}"
+      end
+    end
+  ensure
+    sdk&.close
+  end
+
+  it "evaluates every recursive required feature group truth table" do
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
+
+    fixture[:requiredFeatureGroups].each do |test_case|
+      fixture[:requiredFeatureGroupInputs].zip(test_case[:results]).each do |inputs, expected|
+        sdk = Featurevisor.create_featurevisor(
+          datafile: {
+            schemaVersion: "2", revision: "groups", segments: {},
+            features: {
+              a: { bucketBy: "userId", force: [{ segments: "*", enabled: inputs[:a] }], traffic: [] },
+              b: { bucketBy: "userId", force: [{ segments: "*", enabled: inputs[:b] }], traffic: [] },
+              subject: {
+                bucketBy: "userId",
+                requiredFeatures: test_case[:requirements],
+                traffic: [{ key: "all", segments: "*", percentage: 100_000 }]
+              }
+            }
+          },
+          log_level: "fatal"
+        )
+        expect(sdk.is_enabled("subject")).to eq(expected), "#{test_case[:name]}: #{inputs}"
+      end
+    end
+  end
+
+  it "evaluates shared required variable roots, groups, sticky sources and accumulation" do
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
+    required = fixture[:requiredVariables]
+
+    required[:stickyCases].each do |test_case|
+      sdk = Featurevisor.create_featurevisor(
+        datafile: required[:datafile],
+        sticky_features: test_case[:stickyFeatures],
+        sticky_variables: test_case[:stickyVariables],
+        log_level: "fatal"
+      )
+      expected = test_case[:matched] ? required.dig(:expected, :matchedValue) : required.dig(:expected, :defaultValue)
+      expect(sdk.is_enabled("gated")).to eq(test_case[:matched]), test_case[:name]
+      expect(sdk.get_variable("root")).to eq(expected), test_case[:name]
+      expect(sdk.get_variable("override")).to eq(expected), test_case[:name]
+      expect(sdk.get_variable("featureOverride", "message")).to eq(expected), test_case[:name]
+      expect(sdk.get_variable("accumulated")).to eq(test_case[:accumulated]), test_case[:name]
+    end
+
+    sdk = Featurevisor.create_featurevisor(datafile: required[:datafile], log_level: "fatal")
+    expect(sdk.get_variable("nullGate")).to eq(required.dig(:expected, :matchedValue))
+  end
+
   it "reports direct and dependency driven variable updates for merge and replacement" do
-    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
     globals = fixture[:globalVariables]
     update = globals[:datafileUpdateCase]
     f = Featurevisor.create_featurevisor(datafile: update[:initial], log_level: "fatal")
@@ -156,7 +242,7 @@ RSpec.describe "Featurevisor v3 conformance" do
   end
 
   it "keeps child sticky variables isolated and runs unified module callbacks" do
-    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__)), symbolize_names: true)
+    fixture = JSON.parse(File.read(File.expand_path("../conformance/sdk-v3.json", __dir__), encoding: "UTF-8"), symbolize_names: true)
     datafile = fixture.dig(:globalVariables, :datafile)
     callbacks = []
     f = Featurevisor.create_featurevisor(

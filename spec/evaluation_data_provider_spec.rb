@@ -79,16 +79,17 @@ RSpec.describe Featurevisor.const_get(:InstanceEvaluationDataProvider) do
       expect(reader.get_schema_version).to eq("2")
       expect(reader.get_segment("netherlands")).to eq(datafile_json[:segments][:netherlands])
       expect(reader.get_segment("belgium")).to be_nil
-      expect(reader.get_feature("test")).to eq(datafile_json[:features][:test])
+      expected, = Featurevisor::Normalize.entity(:feature, :test, datafile_json[:features][:test])
+      expect(reader.get_feature("test")).to eq(expected)
       expect(reader.get_feature("test2")).to be_nil
     end
 
     it "should parse stringified conditions" do
       segment = reader.get_segment("germany")
       expect(segment[:conditions]).to be_an(Array)
-      expect(segment[:conditions][0]["value"]).to eq("de")
-      expect(segment[:conditions][0]["attribute"]).to eq("country")
-      expect(segment[:conditions][0]["operator"]).to eq("equals")
+      expect(segment[:conditions][0][:value]).to eq("de")
+      expect(segment[:conditions][0][:attribute]).to eq("country")
+      expect(segment[:conditions][0][:operator]).to eq("equals")
     end
   end
 
@@ -493,14 +494,14 @@ RSpec.describe Featurevisor.const_get(:InstanceEvaluationDataProvider) do
         ).to be true
       end
 
-      it "should match with empty conditions" do
+      it "defensively rejects empty v4 conditions" do
         conditions = []
 
         expect(
           datafile_reader.all_conditions_are_matched(conditions, {
             browser_type: "chrome"
           })
-        ).to be true
+        ).to be false
       end
 
       it "should match with multiple conditions" do

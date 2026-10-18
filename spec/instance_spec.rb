@@ -226,7 +226,7 @@ RSpec.describe "sdk: instance" do
       modules: [
         {
           name: "unit-test",
-          before: ->(options) {
+          before_evaluation: ->(options) {
             feature_key = options[:feature_key]
             variable_key = options[:variable_key]
 
@@ -282,7 +282,7 @@ RSpec.describe "sdk: instance" do
       modules: [
         {
           name: "unit-test",
-          after: ->(evaluation, options) {
+          after_evaluation: ->(evaluation, options) {
             feature_key = options[:feature_key]
             variable_key = options[:variable_key]
 
@@ -396,7 +396,7 @@ RSpec.describe "sdk: instance" do
           myKey: {
             key: "myKey",
             bucketBy: "userId",
-            required: ["requiredKey"],
+            requiredFeatures: ["requiredKey"],
             traffic: [
               {
                 key: "1",
@@ -435,7 +435,7 @@ RSpec.describe "sdk: instance" do
           myKey: {
             key: "myKey",
             bucketBy: "userId",
-            required: ["requiredKey"],
+            requiredFeatures: ["requiredKey"],
             traffic: [
               {
                 key: "1",
@@ -478,9 +478,9 @@ RSpec.describe "sdk: instance" do
           myKey: {
             key: "myKey",
             bucketBy: "userId",
-            required: [
+            requiredFeatures: [
               {
-                key: "requiredKey",
+                feature: "requiredKey",
                 variation: "control" # different variation
               }
             ],
@@ -525,9 +525,9 @@ RSpec.describe "sdk: instance" do
           myKey: {
             key: "myKey",
             bucketBy: "userId",
-            required: [
+            requiredFeatures: [
               {
-                key: "requiredKey",
+                feature: "requiredKey",
                 variation: "treatment" # desired variation
               }
             ],
@@ -655,7 +655,7 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("test", { userId: "user-123", country: "nl" })).to be false
   end
 
-  it "should check if enabled for mutually exclusive features" do
+  it "ignores legacy feature ranges and retains traffic percentage boundaries" do
     bucket_value = 10_000
 
     sdk = Featurevisor.create_featurevisor(
@@ -674,7 +674,7 @@ RSpec.describe "sdk: instance" do
           mutex: {
             key: "mutex",
             bucketBy: "userId",
-            ranges: [[0, 50_000]],
+            ranges: [[50_000, 100_000]],
             traffic: [{ key: "1", segments: "*", percentage: 50_000, allocation: [] }]
           }
         },
@@ -686,6 +686,9 @@ RSpec.describe "sdk: instance" do
     expect(sdk.is_enabled("test", { userId: "123" })).to be false
 
     bucket_value = 40_000
+    expect(sdk.is_enabled("mutex", { userId: "123" })).to be true
+
+    bucket_value = 50_000
     expect(sdk.is_enabled("mutex", { userId: "123" })).to be true
 
     bucket_value = 60_000
@@ -1047,7 +1050,7 @@ RSpec.describe "sdk: instance" do
     expect(sdk.get_variable_integer("test", "count", context)).to eq(0)
 
     expect(sdk.get_variable("test", "price", context)).to eq(9.99)
-    expect(sdk.get_variable_double("test", "price", context)).to eq(9.99)
+    expect(sdk.get_variable_number("test", "price", context)).to eq(9.99)
 
     expect(sdk.get_variable("test", "paymentMethods", context)).to eq(["paypal", "creditcard"])
     expect(sdk.get_variable_array("test", "paymentMethods", context)).to eq([
@@ -1662,9 +1665,9 @@ RSpec.describe "sdk: instance" do
       expect(sdk.send(:get_value_by_type, "1", "integer")).to be_nil
     end
 
-    it "returns finite numbers only for double type" do
-      expect(sdk.send(:get_value_by_type, 1.1, "double")).to eq(1.1)
-      expect(sdk.send(:get_value_by_type, "1.1", "double")).to be_nil
+    it "returns finite numbers only for number type" do
+      expect(sdk.send(:get_value_by_type, 1.1, "number")).to eq(1.1)
+      expect(sdk.send(:get_value_by_type, "1.1", "number")).to be_nil
     end
 
     it "returns nil when value is nil" do

@@ -19,7 +19,7 @@ module Featurevisor
     end
 
     match = version.match(SEMVER_REGEX)
-    unless match
+    unless match && version.ascii_only? && match[0] == version
       raise ArgumentError, "Invalid argument not valid semver ('#{version}' received)"
     end
 
@@ -34,50 +34,29 @@ module Featurevisor
     s == "*" || s.downcase == "x"
   end
 
-  # Forces types to be the same for comparison
-  # @param a [String, Integer] First value
-  # @param b [String, Integer] Second value
-  # @return [Array] Array with both values converted to same type
-  def self.force_type(a, b)
-    if a.is_a?(Integer) != b.is_a?(Integer)
-      [a.to_s, b.to_s]
-    else
-      [a, b]
-    end
-  end
-
-  # Tries to parse a string as an integer
-  # @param v [String] String to parse
-  # @return [Integer, String] Parsed integer or original string
-  def self.try_parse(v)
-    Integer(v, 10)
-  rescue ArgumentError
-    v
-  end
-
   # Compares two strings for version comparison
   # @param a [String] First string
   # @param b [String] Second string
   # @return [Integer] -1 if a < b, 0 if equal, 1 if a > b
-  def self.compare_strings(a, b)
-    return 0 if wildcard?(a) || wildcard?(b)
-
-    ap, bp = force_type(try_parse(a), try_parse(b))
-
-    if ap > bp
-      1
-    elsif ap < bp
-      -1
-    else
-      0
+  def self.compare_strings(a, b, prerelease = false)
+    return 0 if !prerelease && (wildcard?(a) || wildcard?(b))
+    an = /\A[0-9]+\z/.match?(a)
+    bn = /\A[0-9]+\z/.match?(b)
+    if an && bn
+      a = a.sub(/\A0+/, "")
+      b = b.sub(/\A0+/, "")
+      return a.length <=> b.length if a.length != b.length
+    elsif prerelease && an != bn
+      return an ? -1 : 1
     end
+    a <=> b
   end
 
   # Compares version segments
   # @param a [Array<String>, MatchData] First version segments
   # @param b [Array<String>, MatchData] Second version segments
   # @return [Integer] -1 if a < b, 0 if equal, 1 if a > b
-  def self.compare_segments(a, b)
+  def self.compare_segments(a, b, prerelease = false)
     # Convert to arrays if needed
     a_array = a.is_a?(MatchData) ? a.to_a[1..-1] : a.to_a
     b_array = b.is_a?(MatchData) ? b.to_a[1..-1] : b.to_a
@@ -85,10 +64,13 @@ module Featurevisor
     max_length = [a_array.length, b_array.length].max
 
     (0...max_length).each do |i|
+      if prerelease && (i == a_array.length || i == b_array.length)
+        return a_array.length <=> b_array.length
+      end
       a_val = a_array[i] || "0"
       b_val = b_array[i] || "0"
 
-      result = compare_strings(a_val, b_val)
+      result = compare_strings(a_val, b_val, prerelease)
       return result unless result == 0
     end
 
@@ -116,7 +98,7 @@ module Featurevisor
 
     # Validate pre-release
     if p1 && p2
-      compare_segments(p1.split("."), p2.split("."))
+      compare_segments(p1.split("."), p2.split("."), true)
     elsif p1 || p2
       p1 ? -1 : 1
     else
